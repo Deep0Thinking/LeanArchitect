@@ -221,7 +221,7 @@ initialize registerBuiltinAttribute {
     add := fun name stx kind => do
       unless kind == AttributeKind.global do throwError "invalid attribute 'blueprint', must be global"
       let cfg ← elabBlueprintConfig stx
-      withOptions (·.updateBool `trace.blueprint (cfg.trace || ·)) do
+      withOptions (fun o => if cfg.trace then o.set `trace.blueprint true else o) do
 
       let node ← mkNode name cfg
       blueprintExt.add name node
