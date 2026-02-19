@@ -121,4 +121,7 @@ def tryResolveConst (id : Ident) : CoreM Name := do
 
 end ResolveConst
 
+/-- TODO: remove after lean4#12469 -/
+scoped instance {α} [Inhabited α] : Inhabited (Thunk α) := ⟨.mk default⟩
+
 end Architect
