@@ -67,12 +67,12 @@ class Node(BaseSchema):
         if self.title:
             options.append(f"(title := {_quote(self.title)})")
         if add_statement_text and self.statement.text.strip():
-            options.append(f"(statement := {make_docstring(self.statement.text, config, start_column=len("  (statement := "))})")
+            options.append(f"(statement := {make_docstring(self.statement.text, config, start_column=len('  (statement := '))})")
         if add_uses and self.statement.uses_labels:
             options.append(f"(uses := [{_wrap_list([_quote(use) for use in self.statement.uses_labels], indent=4, start_column=len('  (uses := ['), max_columns=config.max_columns)}])")
         if self.proof is not None:
             if add_proof_text and self.proof.text.strip():
-                options.append(f"(proof := {make_docstring(self.proof.text, config, start_column=len("  (proof := "))})")
+                options.append(f"(proof := {make_docstring(self.proof.text, config, start_column=len('  (proof := '))})")
             if add_proof_uses and self.proof.uses_labels:
                 options.append(f"(proofUses := [{_wrap_list([_quote(use) for use in self.proof.uses_labels], indent=4, start_column=len('  (proofUses := ['), max_columns=config.max_columns)}])")
         if self.not_ready:
