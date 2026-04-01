@@ -216,6 +216,31 @@ so that the `\input` line above works. Here are some typical examples for doing 
           build-args: :blueprint
 ```
 
+## Progress statistics
+
+To view formalization progress, use the `#blueprint_progress` command in Lean:
+
+```lean
+#blueprint_progress
+-- Blueprint Progress
+-- ─────────────────────
+-- Total:        8 nodes
+-- Formalized:   3 (38%)
+-- Incomplete:   4 (50%)
+-- Not ready:    1 (12%)
+```
+
+Or from the command line:
+
+```sh
+lake exe extract_blueprint stats MyProject.MyModule
+```
+
+Nodes are categorized into three mutually exclusive groups:
+- **Formalized**: `sorry`-free, formalization complete.
+- **Incomplete**: contains `sorry`, work in progress.
+- **Not ready**: marked with `(notReady := true)`, not yet actionable.
+
 ## Extracting nodes in JSON
 
 To extract the blueprint nodes in machine-readable format, run:
