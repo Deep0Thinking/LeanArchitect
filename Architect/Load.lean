@@ -38,4 +38,12 @@ def latexOutputOfImportModule (module : Name) (options : Options) : IO LatexOutp
 def jsonOfImportModule (module : Name) (options : Options) : IO Json :=
   runEnvOfImports #[module] options (moduleToJson module)
 
+/-- Computes blueprint progress statistics for a module. -/
+def progressOfImportModule (module : Name) (options : Options) : IO ProgressStats :=
+  runEnvOfImports #[module] options do
+    let env ← getEnv
+    let some modIdx := env.getModuleIdx? module | return { total := 0, sorryFree := 0, containsSorry := 0, notReady := 0 }
+    let nodes := (blueprintExt.getModuleEntries env modIdx).map (·.2)
+    computeProgress nodes
+
 end Architect

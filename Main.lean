@@ -44,6 +44,15 @@ def runIndexCmd (p : Parsed) : IO UInt32 := do
     outputLibraryLatex baseDir library modules
   return 0
 
+def runStatsCmd (p : Parsed) : IO UInt32 := do
+  let module := p.positionalArg! "module" |>.as! String |>.toName
+  let options : LeanOptions ← match p.flag? "options" with
+    | some o => IO.ofExcept (Json.parse (o.as! String) >>= fromJson?)
+    | none => pure (∅ : LeanOptions)
+  let stats ← progressOfImportModule module options.toOptions
+  IO.println s!"{stats}"
+  return 0
+
 def singleCmd := `[Cli|
   single VIA runSingleCmd;
   "Only extract the blueprint for the module it was given, might contain broken \\input{}s unless all blueprint files are extracted."
@@ -70,13 +79,25 @@ def indexCmd := `[Cli|
     modules : Array String; "The modules in the library."
 ]
 
+def statsCmd := `[Cli|
+  stats VIA runStatsCmd;
+  "Output progress statistics for the blueprint nodes in a module."
+
+  FLAGS:
+    o, options : String; "LeanOptions in JSON to pass to running the module."
+
+  ARGS:
+    module : String; "The module to compute blueprint progress for."
+]
+
 def blueprintCmd : Cmd := `[Cli|
   "LeanArchitect" NOOP;
   "A blueprint generator for Lean 4."
 
   SUBCOMMANDS:
     singleCmd;
-    indexCmd
+    indexCmd;
+    statsCmd
 ]
 
 def main (args : List String) : IO UInt32 :=

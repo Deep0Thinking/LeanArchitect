@@ -104,10 +104,62 @@ def NodePart.toLatex (part : NodePart) (allParts : Array NodePart := #[part]) (i
   out := out ++ "\\end{" ++ part.latexEnv ++ "}\n"
   return out
 
-private def isMathlibOk (name : Name) : m Bool := do
+def isMathlibOk (name : Name) : m Bool := do
   let some modIdx := (← getEnv).getModuleIdxFor? name | return false
   let module := (← getEnv).allImportedModuleNames[modIdx]!
   return [`Init, `Lean, `Std, `Batteries, `Mathlib].any fun pre => pre.isPrefixOf module
+
+/-- Whether a node is sorry-free (both statement and proof have no `sorryAx`). -/
+def Node.isLeanOk (node : Node) : m Bool := do
+  let (stmtUses, proofUses) ← node.inferUses
+  return stmtUses.leanOk && proofUses.leanOk
+
+/-- Progress statistics for blueprint nodes. -/
+structure ProgressStats where
+  total : Nat
+  sorryFree : Nat
+  containsSorry : Nat
+  notReady : Nat
+
+instance : ToString ProgressStats where
+  toString s :=
+    -- Round to nearest, then adjust the last category so percentages sum to 100
+    let round (n : Nat) : Nat :=
+      if s.total == 0 then 0 else (n * 100 + s.total / 2) / s.total
+    let p1 := round s.sorryFree
+    let p2 := round s.containsSorry
+    let p3 := if s.total == 0 then 0 else 100 - p1 - p2
+    let header := "Blueprint Progress"
+    let lines := #[
+      s!"Total:        {s.total} nodes",
+      s!"Formalized:   {s.sorryFree} ({p1}%)",
+      s!"Incomplete:   {s.containsSorry} ({p2}%)",
+      s!"Not ready:    {s.notReady} ({p3}%)"
+    ]
+    let maxWidth := lines.foldl (fun acc l => max acc l.length) header.length
+    let separator := "".pushn '─' maxWidth
+    header ++ "\n" ++ separator ++ "\n" ++ "\n".intercalate lines.toList
+
+/-- Compute progress statistics for an array of blueprint nodes.
+Categories are mutually exclusive: a node is either formalized (sorry-free),
+incomplete (contains sorry), or not ready. These three sum to `total`. -/
+def computeProgress (nodes : Array Node) : m ProgressStats := do
+  let mut sorryFree := 0
+  let mut containsSorry := 0
+  let mut notReadyCount := 0
+  for node in nodes do
+    if node.notReady then
+      notReadyCount := notReadyCount + 1
+    else if ← node.isLeanOk then
+      sorryFree := sorryFree + 1
+    else
+      containsSorry := containsSorry + 1
+  return {
+    total := nodes.size
+    sorryFree
+    containsSorry
+    notReady := notReadyCount
+  }
 
 def NodeWithPos.toLatex (node : NodeWithPos) : m Latex := do
   -- In the output, we merge the Lean nodes corresponding to the same LaTeX label.
@@ -317,6 +369,22 @@ open Elab Command in
   | _ => throwUnsupportedSyntax
 
 end ToJson
+
+section Progress
+
+/-- Shows blueprint progress statistics for the current module. -/
+syntax (name := blueprint_progress) "#blueprint_progress" : command
+
+open Elab Command in
+@[command_elab blueprint_progress] def elabBlueprintProgress : CommandElab
+  | `(command| #blueprint_progress) => do
+    let env ← getEnv
+    let nodes := (blueprintExt.getEntries env).toArray.map (·.2)
+    let stats ← liftCoreM (computeProgress nodes)
+    logInfo m!"{stats}"
+  | _ => throwUnsupportedSyntax
+
+end Progress
 
 open IO
 
