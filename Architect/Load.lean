@@ -57,4 +57,8 @@ def progressOfImportModules (modules : Array Name) (options : Options) (localOnl
         byModule := byModule.push (mod, modStats)
     return { aggregate, byModule }
 
+/-- Computes the status of a specific blueprint node and its dependency subtree. -/
+def statusOfImportModules (modules : Array Name) (constName : Name) (options : Options) : IO StatusReport :=
+  runEnvOfImports modules options (computeStatus constName)
+
 end Architect

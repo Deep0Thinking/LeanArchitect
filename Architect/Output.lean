@@ -462,6 +462,153 @@ open Elab Command in
 
 end Progress
 
+section Status
+
+variable {m} [Monad m] [MonadEnv m] [MonadError m]
+
+/-- Classification of a single blueprint node's formalization status. -/
+inductive NodeStatus where
+  | formalized | incomplete | notReady
+
+instance : ToString NodeStatus where
+  toString
+    | .formalized => "Formalized"
+    | .incomplete => "Incomplete"
+    | .notReady => "Not ready"
+
+/-- Classify a single blueprint node as formalized, incomplete, or not ready. -/
+def classifyNode (node : Node) : m NodeStatus := do
+  if node.notReady then return .notReady
+  if ← node.isLeanOk then return .formalized
+  return .incomplete
+
+/-- Status report for a specific blueprint node and its dependency subtree. -/
+structure StatusReport where
+  name : Name
+  selfStatus : NodeStatus
+  depStats : ProgressStats
+  blocking : Array (Name × NodeStatus)
+
+private def formatStatusReport (r : StatusReport) : String :=
+  let header := s!"{r.name}\nStatus: {r.selfStatus}"
+  if r.depStats.total == 0 then
+    header ++ "\n\nNo dependencies."
+  else
+    let s := r.depStats
+    let round (n : Nat) : Nat :=
+      if s.total == 0 then 0 else (n * 100 + s.total / 2) / s.total
+    let p1 := round s.sorryFree
+    let p2 := round s.containsSorry
+    let p3 := if s.total == 0 then 0 else 100 - p1 - p2
+    let depSection := s!"\n\nDependencies ({s.total} nodes):"
+      ++ s!"\n  Formalized:   {s.sorryFree} ({p1}%)"
+      ++ s!"\n  Incomplete:   {s.containsSorry} ({p2}%)"
+      ++ s!"\n  Not ready:    {s.notReady} ({p3}%)"
+    let blockingSection :=
+      if r.blocking.isEmpty then ""
+      else
+        let maxNameWidth := r.blocking.foldl (fun acc (n, _) => max acc (toString n).length) 0
+        let lines := r.blocking.map fun (name, status) =>
+          let nameStr := toString name
+          let pad := "".pushn ' ' (maxNameWidth - nameStr.length)
+          s!"  {nameStr}{pad}  {status}"
+        "\n\nBlocking:\n" ++ "\n".intercalate lines.toList
+    header ++ depSection ++ blockingSection
+
+instance : ToString StatusReport where
+  toString := formatStatusReport
+
+open Lean in
+instance : ToMessageData StatusReport where
+  toMessageData r :=
+    let nameMsg := m!"{Expr.const r.name []}"
+    let header := m!"{nameMsg}\nStatus: {r.selfStatus}"
+    if r.depStats.total == 0 then
+      header ++ m!"\n\nNo dependencies."
+    else
+      let s := r.depStats
+      let round (n : Nat) : Nat :=
+        if s.total == 0 then 0 else (n * 100 + s.total / 2) / s.total
+      let p1 := round s.sorryFree
+      let p2 := round s.containsSorry
+      let p3 := if s.total == 0 then 0 else 100 - p1 - p2
+      let depSection := m!"\n\nDependencies ({s.total} nodes):"
+        ++ m!"\n  Formalized:   {s.sorryFree} ({p1}%)"
+        ++ m!"\n  Incomplete:   {s.containsSorry} ({p2}%)"
+        ++ m!"\n  Not ready:    {s.notReady} ({p3}%)"
+      let blockingSection :=
+        if r.blocking.isEmpty then m!""
+        else
+          let maxNameWidth := r.blocking.foldl (fun acc (n, _) => max acc (toString n).length) 0
+          let lines := r.blocking.foldl (init := m!"\n\nBlocking:") fun acc (name, status) =>
+            let nameStr := toString name
+            let pad := "".pushn ' ' (maxNameWidth - nameStr.length)
+            acc ++ m!"\n  {Expr.const name []}{pad}  {status}"
+          lines
+      header ++ depSection ++ blockingSection
+
+/-- Collect explicit uses from a NodePart, resolving both name-based and label-based references. -/
+private def collectExplicitUses (env : Environment) (part : NodePart) : NameSet :=
+  let excludeNames := part.excludes.foldl (·.insert ·) NameSet.empty
+  let names := part.uses.foldl (·.insert ·) NameSet.empty |>.filter (!excludeNames.contains ·)
+  -- Resolve usesLabels to names
+  let labelNames := part.usesLabels.foldl (init := NameSet.empty) fun acc label =>
+    (getLeanNamesOfLatexLabel env label).foldl (·.insert ·) acc
+  -- Resolve excludesLabels to names and filter
+  let excludeLabelNames := part.excludesLabels.foldl (init := NameSet.empty) fun acc label =>
+    (getLeanNamesOfLatexLabel env label).foldl (·.insert ·) acc
+  let labelNames := labelNames.filter (!excludeLabelNames.contains ·)
+  names.union labelNames
+
+/-- Compute the formalization status of a specific blueprint node and its dependency subtree. -/
+def computeStatus (name : Name) : m StatusReport := do
+  let env ← getEnv
+  let some node := blueprintExt.find? env name
+    | throwError "no @[blueprint] node with name {name}"
+  let selfStatus ← classifyNode node
+  -- Get inferred transitive blueprint dependencies
+  let (typeUsed, valueUsed) ← collectUsed name
+  let mut allUsed := typeUsed.union valueUsed |>.erase ``sorryAx
+  -- Merge explicit uses from statement and proof
+  allUsed := (collectExplicitUses env node.statement).foldl (·.insert ·) allUsed
+  if let some proof := node.proof then
+    allUsed := (collectExplicitUses env proof).foldl (·.insert ·) allUsed
+  -- Remove self-reference
+  allUsed := allUsed.erase name
+  -- Filter to only blueprint nodes
+  let depNodes := allUsed.toArray.filterMap fun n => blueprintExt.find? env n
+  let depStats ← computeProgress depNodes
+  -- Collect blocking (non-formalized) dependencies
+  let mut blocking : Array (Name × NodeStatus) := #[]
+  for node in depNodes do
+    let status ← classifyNode node
+    unless status matches .formalized do
+      blocking := blocking.push (node.name, status)
+  -- Sort blocking: notReady first, then incomplete, alphabetical within each
+  let sortedBlocking := blocking.qsort fun (n1, s1) (n2, s2) =>
+    match s1, s2 with
+    | .notReady, .incomplete => true
+    | .incomplete, .notReady => false
+    | _, _ => n1.toString < n2.toString
+  return { name, selfStatus, depStats, blocking := sortedBlocking }
+
+/-- Shows formalization status of a specific blueprint node and its dependency subtree.
+- `#blueprint_status name` shows the status of `name` and its transitive dependencies. -/
+syntax (name := blueprint_status) "#blueprint_status" ppSpace ident : command
+
+open Elab Command in
+@[command_elab blueprint_status] def elabBlueprintStatus : CommandElab
+  | `(command| #blueprint_status $id) => do
+    let name ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo id
+    let env ← getEnv
+    unless (blueprintExt.find? env name).isSome do
+      throwError "'{name}' is not a @[blueprint] node"
+    let report ← liftCoreM (computeStatus name)
+    logInfo m!"{report}"
+  | _ => throwUnsupportedSyntax
+
+end Status
+
 open IO
 
 def moduleToRelPath (module : Name) (ext : String) : System.FilePath :=
