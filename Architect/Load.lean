@@ -38,12 +38,23 @@ def latexOutputOfImportModule (module : Name) (options : Options) : IO LatexOutp
 def jsonOfImportModule (module : Name) (options : Options) : IO Json :=
   runEnvOfImports #[module] options (moduleToJson module)
 
-/-- Computes blueprint progress statistics for a module. -/
-def progressOfImportModule (module : Name) (options : Options) : IO ProgressStats :=
-  runEnvOfImports #[module] options do
+/-- Computes blueprint progress report across modules.
+If `localOnly` is true, only counts nodes defined in the given modules.
+Otherwise, also includes nodes from all their imports. -/
+def progressOfImportModules (modules : Array Name) (options : Options) (localOnly : Bool := false) : IO ProgressReport :=
+  runEnvOfImports modules options do
     let env ← getEnv
-    let some modIdx := env.getModuleIdx? module | return { total := 0, sorryFree := 0, containsSorry := 0, notReady := 0 }
-    let nodes := (blueprintExt.getModuleEntries env modIdx).map (·.2)
-    computeProgress nodes
+    let mut aggregate := ProgressStats.empty
+    let mut byModule : Array (Name × ProgressStats) := #[]
+    -- Determine which modules to include
+    let targetModules := if localOnly then modules
+      else env.allImportedModuleNames
+    for mod in targetModules do
+      if let some modIdx := env.getModuleIdx? mod then
+        let nodes := (blueprintExt.getModuleEntries env modIdx).map (·.2)
+        let modStats ← computeProgress nodes
+        aggregate := aggregate.merge modStats
+        byModule := byModule.push (mod, modStats)
+    return { aggregate, byModule }
 
 end Architect

@@ -140,6 +140,45 @@ instance : ToString ProgressStats where
     let separator := "".pushn '─' maxWidth
     header ++ "\n" ++ separator ++ "\n" ++ "\n".intercalate lines.toList
 
+/-- Progress report with aggregate stats and optional per-module breakdown. -/
+structure ProgressReport where
+  aggregate : ProgressStats
+  byModule : Array (Name × ProgressStats)
+  showByModule : Bool := true
+
+instance : ToString ProgressReport where
+  toString r :=
+    let agg := toString r.aggregate
+    if !r.showByModule || r.byModule.isEmpty then
+      agg
+    else
+      -- Only show modules that have blueprint nodes
+      let modules := r.byModule.filter (·.2.total > 0)
+      if modules.isEmpty then agg
+      else
+        -- Align columns: find max width of module name and fraction
+        let maxNameWidth := modules.foldl (fun acc (mod, _) => max acc (toString mod).length) 0
+        let maxFracWidth := modules.foldl (fun acc (_, s) =>
+          max acc s!"{s.sorryFree}/{s.total}".length) 0
+        let moduleLines := modules.map fun (mod, s) =>
+          let name := toString mod
+          let frac := s!"{s.sorryFree}/{s.total}"
+          let namePad := "".pushn ' ' (maxNameWidth - name.length)
+          let fracPad := "".pushn ' ' (maxFracWidth - frac.length)
+          let pct := if s.total == 0 then "0" else toString ((s.sorryFree * 100 + s.total / 2) / s.total)
+          s!"  {name}{namePad}  {fracPad}{frac}  ({pct}%)"
+        let allLines := #[agg, "", "By module:"] ++ moduleLines
+        "\n".intercalate allLines.toList
+
+def ProgressStats.merge (a b : ProgressStats) : ProgressStats :=
+  { total := a.total + b.total
+    sorryFree := a.sorryFree + b.sorryFree
+    containsSorry := a.containsSorry + b.containsSorry
+    notReady := a.notReady + b.notReady }
+
+def ProgressStats.empty : ProgressStats :=
+  { total := 0, sorryFree := 0, containsSorry := 0, notReady := 0 }
+
 /-- Compute progress statistics for an array of blueprint nodes.
 Categories are mutually exclusive: a node is either formalized (sorry-free),
 incomplete (contains sorry), or not ready. These three sum to `total`. -/
@@ -372,16 +411,53 @@ end ToJson
 
 section Progress
 
-/-- Shows blueprint progress statistics for the current module. -/
-syntax (name := blueprint_progress) "#blueprint_progress" : command
+/-- Shows blueprint progress statistics.
+- `#blueprint_progress` shows project-wide statistics with per-module breakdown.
+- `#blueprint_progress nobreakdown` shows project-wide statistics without breakdown.
+- `#blueprint_progress local` shows current module statistics with per-module breakdown.
+- `#blueprint_progress local nobreakdown` shows current module statistics without breakdown. -/
+declare_syntax_cat blueprintProgressOpt
+syntax &"local" : blueprintProgressOpt
+syntax "nobreakdown" : blueprintProgressOpt
+syntax (name := blueprint_progress) "#blueprint_progress" (ppSpace blueprintProgressOpt)* : command
+
+open Elab Command in
+private def collectAllProgress : CommandElabM (ProgressStats × Array (Name × ProgressStats)) := do
+  let env ← getEnv
+  let mut aggregate := ProgressStats.empty
+  let mut byModule : Array (Name × ProgressStats) := #[]
+  for mod in env.allImportedModuleNames do
+    if let some modIdx := env.getModuleIdx? mod then
+      let nodes := (blueprintExt.getModuleEntries env modIdx).map (·.2)
+      let modStats ← liftCoreM (computeProgress nodes)
+      aggregate := aggregate.merge modStats
+      byModule := byModule.push (mod, modStats)
+  let currentNodes := (blueprintExt.getEntries env).toArray.map (·.2)
+  let currentStats ← liftCoreM (computeProgress currentNodes)
+  aggregate := aggregate.merge currentStats
+  byModule := byModule.push (← liftCoreM getMainModule, currentStats)
+  return (aggregate, byModule)
+
+open Elab Command in
+private def collectLocalProgress : CommandElabM (ProgressStats × Array (Name × ProgressStats)) := do
+  let env ← getEnv
+  let nodes := (blueprintExt.getEntries env).toArray.map (·.2)
+  let stats ← liftCoreM (computeProgress nodes)
+  let modName ← liftCoreM getMainModule
+  return (stats, #[(modName, stats)])
 
 open Elab Command in
 @[command_elab blueprint_progress] def elabBlueprintProgress : CommandElab
-  | `(command| #blueprint_progress) => do
-    let env ← getEnv
-    let nodes := (blueprintExt.getEntries env).toArray.map (·.2)
-    let stats ← liftCoreM (computeProgress nodes)
-    logInfo m!"{stats}"
+  | `(command| #blueprint_progress $[$opts:blueprintProgressOpt]*) => do
+    let optStrs := opts.map (·.raw.getSubstring?.get!.toString.trimAscii.toString)
+    let isLocal := optStrs.contains "local"
+    let noBreakdown := optStrs.contains "nobreakdown"
+    let (aggregate, byModule) ← if isLocal then collectLocalProgress else collectAllProgress
+    if noBreakdown then
+      logInfo m!"{aggregate}"
+    else
+      let report : ProgressReport := { aggregate, byModule }
+      logInfo m!"{report}"
   | _ => throwUnsupportedSyntax
 
 end Progress

@@ -45,11 +45,14 @@ def runIndexCmd (p : Parsed) : IO UInt32 := do
   return 0
 
 def runStatsCmd (p : Parsed) : IO UInt32 := do
-  let module := p.positionalArg! "module" |>.as! String |>.toName
+  let modules := p.variableArgsAs! String |>.map (·.toName)
   let options : LeanOptions ← match p.flag? "options" with
     | some o => IO.ofExcept (Json.parse (o.as! String) >>= fromJson?)
     | none => pure (∅ : LeanOptions)
-  let stats ← progressOfImportModule module options.toOptions
+  let localOnly := p.hasFlag "local"
+  let noBreakdown := p.hasFlag "nobreakdown"
+  let stats ← progressOfImportModules modules options.toOptions localOnly
+  let stats := { stats with showByModule := !noBreakdown }
   IO.println s!"{stats}"
   return 0
 
@@ -81,13 +84,15 @@ def indexCmd := `[Cli|
 
 def statsCmd := `[Cli|
   stats VIA runStatsCmd;
-  "Output progress statistics for the blueprint nodes in a module."
+  "Output progress statistics for the blueprint nodes in one or more modules."
 
   FLAGS:
-    o, options : String; "LeanOptions in JSON to pass to running the module."
+    l, "local"; "Only count nodes defined in the given modules, excluding imports."
+    n, "nobreakdown"; "Hide the per-module breakdown."
+    o, options : String; "LeanOptions in JSON to pass to running the modules."
 
   ARGS:
-    module : String; "The module to compute blueprint progress for."
+    ...modules : String; "The modules to compute blueprint progress for."
 ]
 
 def blueprintCmd : Cmd := `[Cli|
