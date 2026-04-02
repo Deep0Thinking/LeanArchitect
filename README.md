@@ -223,17 +223,29 @@ To view formalization progress, use the `#blueprint_progress` command in Lean:
 ```lean
 #blueprint_progress
 -- Blueprint Progress
--- ─────────────────────
--- Total:        8 nodes
--- Formalized:   3 (38%)
--- Incomplete:   4 (50%)
--- Not ready:    1 (12%)
+-- ──────────────────────
+-- Total:        10 nodes
+-- Formalized:   5 (50%)
+-- Incomplete:   4 (40%)
+-- Not ready:    1 (10%)
+--
+-- By module:
+--   MyProject.Algebra  3/8 (37%)
+--   MyProject.Topology  1/1 (100%)
+--   MyProject.Main  1/1 (100%)
 ```
 
-Or from the command line:
+The command aggregates all blueprint nodes from the current module and its imports, with a per-module breakdown. Place it in a root file that imports the full project to get project-wide statistics. Variants:
+
+- `#blueprint_progress` — project-wide with per-module breakdown.
+- `#blueprint_progress nobreakdown` — project-wide without breakdown.
+- `#blueprint_progress local` — current module only, with breakdown.
+- `#blueprint_progress local nobreakdown` — current module only, without breakdown.
+
+Or from the command line, passing one or more modules:
 
 ```sh
-lake exe extract_blueprint stats MyProject.MyModule
+lake exe extract_blueprint stats MyProject.Module1 MyProject.Module2
 ```
 
 Nodes are categorized into three mutually exclusive groups:
