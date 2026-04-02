@@ -95,6 +95,28 @@ def statsCmd := `[Cli|
     ...modules : String; "The modules to compute blueprint progress for."
 ]
 
+def runStatusCmd (p : Parsed) : IO UInt32 := do
+  let modules := p.variableArgsAs! String |>.map (·.toName)
+  let name := (p.positionalArg! "name" |>.as! String).toName
+  let options : LeanOptions ← match p.flag? "options" with
+    | some o => IO.ofExcept (Json.parse (o.as! String) >>= fromJson?)
+    | none => pure (∅ : LeanOptions)
+  let report ← statusOfImportModules modules name options.toOptions
+  IO.println s!"{report}"
+  return 0
+
+def statusCmd := `[Cli|
+  status VIA runStatusCmd;
+  "Show formalization status of a specific blueprint node and its dependency subtree."
+
+  FLAGS:
+    o, options : String; "LeanOptions in JSON to pass to running the modules."
+
+  ARGS:
+    name : String; "The fully qualified Lean name of the declaration."
+    ...modules : String; "The modules to load (the declaration must be reachable from these)."
+]
+
 def blueprintCmd : Cmd := `[Cli|
   "LeanArchitect" NOOP;
   "A blueprint generator for Lean 4."
@@ -102,7 +124,8 @@ def blueprintCmd : Cmd := `[Cli|
   SUBCOMMANDS:
     singleCmd;
     indexCmd;
-    statsCmd
+    statsCmd;
+    statusCmd
 ]
 
 def main (args : List String) : IO UInt32 :=

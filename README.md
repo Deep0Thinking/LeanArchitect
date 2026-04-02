@@ -253,6 +253,41 @@ Nodes are categorized into three mutually exclusive groups:
 - **Incomplete**: contains `sorry`, work in progress.
 - **Not ready**: marked with `(notReady := true)`, not yet actionable.
 
+## Node status
+
+To inspect a specific declaration and its dependency subtree, use `#blueprint_status`:
+
+```lean
+#blueprint_status MyProject.add_comm
+-- MyProject.add_comm
+-- Status: Incomplete
+--
+-- Dependencies (3 nodes):
+--   Formalized:   1 (33%)
+--   Incomplete:   2 (67%)
+--   Not ready:    0 (0%)
+--
+-- Blocking:
+--   MyProject.succ_add  Incomplete
+--   MyProject.mul       Incomplete
+```
+
+This works on any `@[blueprint]`-tagged declaration — theorems, lemmas, definitions, and inductives. The output shows:
+
+- **Status**: the node's own formalization status.
+- **Dependencies**: aggregate statistics for all transitive blueprint dependencies.
+- **Blocking**: the subset of dependencies that are not yet formalized, sorted with not-ready nodes first.
+
+If the node has no blueprint dependencies, the output shows `No dependencies.` instead.
+
+Or from the command line:
+
+```sh
+lake exe extract_blueprint status MyProject.add_comm MyProject.Module1
+```
+
+The first argument is the fully qualified Lean name; the remaining arguments are the modules to load (the declaration must be reachable from these modules).
+
 ## Extracting nodes in JSON
 
 To extract the blueprint nodes in machine-readable format, run:
