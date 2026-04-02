@@ -117,6 +117,28 @@ def statusCmd := `[Cli|
     ...modules : String; "The modules to load (the declaration must be reachable from these)."
 ]
 
+def runNextCmd (p : Parsed) : IO UInt32 := do
+  let modules := p.variableArgsAs! String |>.map (·.toName)
+  let options : LeanOptions ← match p.flag? "options" with
+    | some o => IO.ofExcept (Json.parse (o.as! String) >>= fromJson?)
+    | none => pure (∅ : LeanOptions)
+  let localOnly := p.hasFlag "local"
+  let report ← nextOfImportModules modules options.toOptions localOnly
+  IO.println s!"{report}"
+  return 0
+
+def nextCmd := `[Cli|
+  next VIA runNextCmd;
+  "Show actionable blueprint nodes: incomplete nodes whose all dependencies are formalized."
+
+  FLAGS:
+    l, "local"; "Only consider nodes defined in the given modules, excluding imports."
+    o, options : String; "LeanOptions in JSON to pass to running the modules."
+
+  ARGS:
+    ...modules : String; "The modules to search for actionable nodes."
+]
+
 def blueprintCmd : Cmd := `[Cli|
   "LeanArchitect" NOOP;
   "A blueprint generator for Lean 4."
@@ -125,7 +147,8 @@ def blueprintCmd : Cmd := `[Cli|
     singleCmd;
     indexCmd;
     statsCmd;
-    statusCmd
+    statusCmd;
+    nextCmd
 ]
 
 def main (args : List String) : IO UInt32 :=

@@ -609,6 +609,103 @@ open Elab Command in
 
 end Status
 
+section Next
+
+variable {m} [Monad m] [MonadEnv m] [MonadError m]
+
+/-- An incomplete blueprint node with its dependency completion percentage. -/
+structure IncompleteNode where
+  name : Name
+  module : Name
+  depPct : Nat  -- percentage of deps formalized (0-100)
+
+/-- Report listing all incomplete blueprint nodes. -/
+structure NextReport where
+  nodes : Array IncompleteNode
+
+instance : ToString NextReport where
+  toString r :=
+    if r.nodes.isEmpty then "No incomplete nodes."
+    else
+      let maxNameWidth := r.nodes.foldl (fun acc n => max acc (toString n.name).length) 0
+      let lines := r.nodes.map fun node =>
+        let nameStr := toString node.name
+        let pad := "".pushn ' ' (maxNameWidth - nameStr.length)
+        let pctStr := s!"({node.depPct}%)"
+        let pctPad := "".pushn ' ' (6 - pctStr.length)
+        s!"  {nameStr}{pad}  {pctPad}{pctStr}  {node.module}"
+      s!"Incomplete ({r.nodes.size} nodes):\n" ++ "\n".intercalate lines.toList
+
+open Lean in
+instance : ToMessageData NextReport where
+  toMessageData r :=
+    if r.nodes.isEmpty then m!"No incomplete nodes."
+    else
+      let maxNameWidth := r.nodes.foldl (fun acc n => max acc (toString n.name).length) 0
+      r.nodes.foldl (init := m!"Incomplete ({r.nodes.size} nodes):") fun acc node =>
+        let pad := "".pushn ' ' (maxNameWidth - (toString node.name).length)
+        let pctStr := s!"({node.depPct}%)"
+        let pctPad := "".pushn ' ' (6 - pctStr.length)
+        acc ++ m!"\n  {Expr.const node.name []}{pad}  {pctPad}{pctStr}  {node.module}"
+
+/-- Collect all incomplete blueprint nodes with their dependency completion percentage. -/
+def collectIncomplete (moduleNodes : Array (Name × Array Node)) : m NextReport := do
+  let env ← getEnv
+  let mut result : Array IncompleteNode := #[]
+  for (mod, nodes) in moduleNodes do
+    for node in nodes do
+      if node.notReady then continue
+      unless env.contains node.name do continue
+      let status ← classifyNode node
+      if status matches .formalized then continue
+      let report ← computeStatus node.name
+      let depPct := if report.depStats.total == 0 then 100
+        else (report.depStats.sorryFree * 100 + report.depStats.total / 2) / report.depStats.total
+      result := result.push { name := node.name, module := mod, depPct }
+  -- Sort by percentage descending (most ready first), then by name
+  let sortedNodes := result.qsort fun a b =>
+    if a.depPct != b.depPct then a.depPct > b.depPct
+    else a.name.toString < b.name.toString
+  return { nodes := sortedNodes }
+
+/-- Shows actionable blueprint nodes: incomplete nodes whose all dependencies are formalized.
+- `#blueprint_next` shows actionable nodes across all modules.
+- `#blueprint_next local` shows actionable nodes in the current module only. -/
+declare_syntax_cat blueprintNextOpt
+syntax &"local" : blueprintNextOpt
+syntax (name := blueprint_next) "#blueprint_next" (ppSpace blueprintNextOpt)* : command
+
+open Elab Command in
+private def collectAllModuleNodes : CommandElabM (Array (Name × Array Node)) := do
+  let env ← getEnv
+  let mut result : Array (Name × Array Node) := #[]
+  for mod in env.allImportedModuleNames do
+    if let some modIdx := env.getModuleIdx? mod then
+      let nodes := (blueprintExt.getModuleEntries env modIdx).map (·.2)
+      result := result.push (mod, nodes)
+  let currentNodes := (blueprintExt.getEntries env).toArray.map (·.2)
+  result := result.push (← liftCoreM getMainModule, currentNodes)
+  return result
+
+open Elab Command in
+private def collectLocalModuleNodes : CommandElabM (Array (Name × Array Node)) := do
+  let env ← getEnv
+  let nodes := (blueprintExt.getEntries env).toArray.map (·.2)
+  let modName ← liftCoreM getMainModule
+  return #[(modName, nodes)]
+
+open Elab Command in
+@[command_elab blueprint_next] def elabBlueprintNext : CommandElab
+  | `(command| #blueprint_next $[$opts:blueprintNextOpt]*) => do
+    let optStrs := opts.map (·.raw.getSubstring?.get!.toString.trimAscii.toString)
+    let isLocal := optStrs.contains "local"
+    let moduleNodes ← if isLocal then collectLocalModuleNodes else collectAllModuleNodes
+    let report ← liftCoreM (collectIncomplete moduleNodes)
+    logInfo m!"{report}"
+  | _ => throwUnsupportedSyntax
+
+end Next
+
 open IO
 
 def moduleToRelPath (module : Name) (ext : String) : System.FilePath :=

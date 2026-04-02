@@ -288,6 +288,32 @@ lake exe extract_blueprint status MyProject.add_comm MyProject.Module1
 
 The first argument is the fully qualified Lean name; the remaining arguments are the modules to load (the declaration must be reachable from these modules).
 
+## Incomplete nodes
+
+To see all incomplete nodes and how close they are to being unblocked, use `#blueprint_next`:
+
+```lean
+#blueprint_next
+-- Incomplete (4 nodes):
+--   MyProject.mul       (100%)  MyProject.Algebra
+--   MyProject.succ_add  (100%)  MyProject.Algebra
+--   MyProject.add_comm   (75%)  MyProject.Topology
+--   MyProject.mul_comm   (50%)  MyProject.Algebra
+```
+
+Each node shows the percentage of its transitive blueprint dependencies that are formalized. Nodes at **100%** are ready to work on immediately — all their dependencies are done. Nodes marked `(notReady := true)` are excluded.
+
+Variants:
+
+- `#blueprint_next` — search all modules.
+- `#blueprint_next local` — search the current module only.
+
+Or from the command line:
+
+```sh
+lake exe extract_blueprint next MyProject.Module1 MyProject.Module2
+```
+
 ## Extracting nodes in JSON
 
 To extract the blueprint nodes in machine-readable format, run:
