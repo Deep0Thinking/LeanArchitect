@@ -223,16 +223,16 @@ To view formalization progress, use the `#blueprint_progress` command in Lean:
 ```lean
 #blueprint_progress
 -- Blueprint Progress
--- ──────────────────────
--- Total:        10 nodes
--- Formalized:   5 (50%)
--- Incomplete:   4 (40%)
--- Not ready:    1 (10%)
+-- ────────────────────────
+-- Total:           10 nodes
+-- Formalized:    5/10  (50%)
+-- Incomplete:    4/10  (40%)
+-- Not ready:     1/10  (10%)
 --
 -- By module:
---   MyProject.Algebra  3/8 (37%)
---   MyProject.Topology  1/1 (100%)
---   MyProject.Main  1/1 (100%)
+--   MyProject.Algebra   3/8  (38%)
+--   MyProject.Topology  1/1  (100%)
+--   MyProject.Main      1/1  (100%)
 ```
 
 The command aggregates all blueprint nodes from the current module and its imports, with a per-module breakdown. Place it in a root file that imports the full project to get project-wide statistics. Variants:
@@ -245,7 +245,7 @@ The command aggregates all blueprint nodes from the current module and its impor
 Or from the command line, passing one or more modules:
 
 ```sh
-lake exe extract_blueprint stats MyProject.Module1 MyProject.Module2
+lake exe extract_blueprint progress MyProject.Module1 MyProject.Module2
 ```
 
 Nodes are categorized into three mutually exclusive groups:
@@ -263,13 +263,13 @@ To inspect a specific declaration and its dependency subtree, use `#blueprint_st
 -- Status: Incomplete
 --
 -- Dependencies (3 nodes):
---   Formalized:   1 (33%)
---   Incomplete:   2 (67%)
---   Not ready:    0 (0%)
+--   Formalized:   1/3  (33%)
+--   Incomplete:   2/3  (67%)
+--   Not ready:    0/3   (0%)
 --
--- Blocking:
---   MyProject.succ_add  Incomplete
---   MyProject.mul       Incomplete
+-- Blocking (2 nodes):
+--   MyProject.succ_add  1/2  (50%)  Incomplete
+--   MyProject.mul       0/1   (0%)  Incomplete
 ```
 
 This works on any `@[blueprint]`-tagged declaration — theorems, lemmas, definitions, and inductives. The output shows:
@@ -290,28 +290,63 @@ The first argument is the fully qualified Lean name; the remaining arguments are
 
 ## Incomplete nodes
 
-To see all incomplete nodes and how close they are to being unblocked, use `#blueprint_next`:
+To see all incomplete nodes and how close they are to being unblocked, use `#blueprint_incomplete`:
 
 ```lean
-#blueprint_next
+#blueprint_incomplete
 -- Incomplete (4 nodes):
---   MyProject.mul       (100%)  MyProject.Algebra
---   MyProject.succ_add  (100%)  MyProject.Algebra
---   MyProject.add_comm   (75%)  MyProject.Topology
---   MyProject.mul_comm   (50%)  MyProject.Algebra
+--   MyProject.mul       0/0 (100%)  MyProject.Algebra
+--   MyProject.succ_add  2/2 (100%)  MyProject.Algebra
+--   MyProject.add_comm  3/4  (75%)  MyProject.Topology
+--   MyProject.mul_comm  1/2  (50%)  MyProject.Algebra
 ```
 
-Each node shows the percentage of its transitive blueprint dependencies that are formalized. Nodes at **100%** are ready to work on immediately — all their dependencies are done. Nodes marked `(notReady := true)` are excluded.
+Each node shows how many of its blueprint dependencies are formalized. Nodes at **100%** are ready to work on immediately — all their dependencies are done. Nodes marked `(notReady := true)` are excluded.
 
 Variants:
 
-- `#blueprint_next` — search all modules.
-- `#blueprint_next local` — search the current module only.
+- `#blueprint_incomplete` — search all modules.
+- `#blueprint_incomplete local` — search the current module only.
 
 Or from the command line:
 
 ```sh
-lake exe extract_blueprint next MyProject.Module1 MyProject.Module2
+lake exe extract_blueprint incomplete MyProject.Module1 MyProject.Module2
+```
+
+### Impact analysis
+
+To see the reverse dependencies of a node — which nodes depend on it and which would be unblocked by formalizing it — use `#blueprint_impact`:
+
+```lean
+#blueprint_impact MyProject.succ_add
+```
+
+Example output:
+
+```
+MyProject.succ_add
+Status: Incomplete
+
+Depended on by (2 nodes):
+  MyProject.add_comm  3/4  (75%)  Incomplete  MyProject.Algebra
+  MyProject.flt       0/2   (0%)  Not ready   MyProject.Algebra
+
+Would unblock (1 node):
+  MyProject.add_comm  3/4  (75%)  Incomplete  MyProject.Algebra
+```
+
+"Would unblock" lists incomplete nodes whose *only* remaining blocking dependency is the target node. Formalizing the target would make these nodes fully actionable (100% dependency completion in `#blueprint_incomplete`).
+
+Variants:
+
+- `#blueprint_impact name` — search all modules.
+- `#blueprint_impact name local` — search the current module only.
+
+Or from the command line:
+
+```sh
+lake exe extract_blueprint impact MyProject.succ_add MyProject.Module1 MyProject.Module2
 ```
 
 ## Extracting nodes in JSON

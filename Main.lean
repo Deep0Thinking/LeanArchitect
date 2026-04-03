@@ -44,7 +44,7 @@ def runIndexCmd (p : Parsed) : IO UInt32 := do
     outputLibraryLatex baseDir library modules
   return 0
 
-def runStatsCmd (p : Parsed) : IO UInt32 := do
+def runProgressCmd (p : Parsed) : IO UInt32 := do
   let modules := p.variableArgsAs! String |>.map (·.toName)
   let options : LeanOptions ← match p.flag? "options" with
     | some o => IO.ofExcept (Json.parse (o.as! String) >>= fromJson?)
@@ -82,8 +82,8 @@ def indexCmd := `[Cli|
     modules : Array String; "The modules in the library."
 ]
 
-def statsCmd := `[Cli|
-  stats VIA runStatsCmd;
+def progressCmd := `[Cli|
+  progress VIA runProgressCmd;
   "Output progress statistics for the blueprint nodes in one or more modules."
 
   FLAGS:
@@ -117,26 +117,50 @@ def statusCmd := `[Cli|
     ...modules : String; "The modules to load (the declaration must be reachable from these)."
 ]
 
-def runNextCmd (p : Parsed) : IO UInt32 := do
+def runIncompleteCmd (p : Parsed) : IO UInt32 := do
   let modules := p.variableArgsAs! String |>.map (·.toName)
   let options : LeanOptions ← match p.flag? "options" with
     | some o => IO.ofExcept (Json.parse (o.as! String) >>= fromJson?)
     | none => pure (∅ : LeanOptions)
   let localOnly := p.hasFlag "local"
-  let report ← nextOfImportModules modules options.toOptions localOnly
+  let report ← incompleteOfImportModules modules options.toOptions localOnly
   IO.println s!"{report}"
   return 0
 
-def nextCmd := `[Cli|
-  next VIA runNextCmd;
-  "Show actionable blueprint nodes: incomplete nodes whose all dependencies are formalized."
+def incompleteCmd := `[Cli|
+  incomplete VIA runIncompleteCmd;
+  "Show incomplete blueprint nodes sorted by dependency completion."
 
   FLAGS:
     l, "local"; "Only consider nodes defined in the given modules, excluding imports."
     o, options : String; "LeanOptions in JSON to pass to running the modules."
 
   ARGS:
-    ...modules : String; "The modules to search for actionable nodes."
+    ...modules : String; "The modules to search for incomplete nodes."
+]
+
+def runImpactCmd (p : Parsed) : IO UInt32 := do
+  let modules := p.variableArgsAs! String |>.map (·.toName)
+  let name := (p.positionalArg! "name" |>.as! String).toName
+  let options : LeanOptions ← match p.flag? "options" with
+    | some o => IO.ofExcept (Json.parse (o.as! String) >>= fromJson?)
+    | none => pure (∅ : LeanOptions)
+  let localOnly := p.hasFlag "local"
+  let report ← impactOfImportModules modules name options.toOptions localOnly
+  IO.println s!"{report}"
+  return 0
+
+def impactCmd := `[Cli|
+  impact VIA runImpactCmd;
+  "Show which nodes depend on a given blueprint node and which would be unblocked by formalizing it."
+
+  FLAGS:
+    l, "local"; "Only consider nodes defined in the given modules, excluding imports."
+    o, options : String; "LeanOptions in JSON to pass to running the modules."
+
+  ARGS:
+    name : String; "The fully qualified Lean name of the declaration."
+    ...modules : String; "The modules to load (the declaration must be reachable from these)."
 ]
 
 def blueprintCmd : Cmd := `[Cli|
@@ -146,9 +170,10 @@ def blueprintCmd : Cmd := `[Cli|
   SUBCOMMANDS:
     singleCmd;
     indexCmd;
-    statsCmd;
+    progressCmd;
     statusCmd;
-    nextCmd
+    incompleteCmd;
+    impactCmd
 ]
 
 def main (args : List String) : IO UInt32 :=
