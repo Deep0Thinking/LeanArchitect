@@ -216,6 +216,34 @@ so that the `\input` line above works. Here are some typical examples for doing 
           build-args: :blueprint
 ```
 
+## Auto-blueprinting
+
+By default, each declaration must be tagged with `@[blueprint]` to appear in the blueprint. To automatically include all declarations with docstrings, use:
+
+```lean
+set_option blueprint.all true
+
+/-- Natural number addition. -/
+def add (a b : Nat) : Nat := ...          -- auto-blueprinted
+
+/-- Commutativity of addition. -/
+theorem add_comm : add a b = add b a := ...  -- auto-blueprinted
+
+theorem helper : ... := ...               -- NOT included (no docstring)
+```
+
+The statement text comes from the docstring, dependencies are auto-inferred, and the LaTeX environment is determined by the declaration kind (theorem → `theorem`, def/inductive → `definition`).
+
+To override specific options for a declaration, add `@[blueprint ...]` explicitly — it takes precedence over auto-mode:
+
+```lean
+/-- Fermat's last theorem. -/
+@[blueprint (title := "Taylor-Wiles") (notReady := true)]
+theorem flt : ... := ...
+```
+
+Note: `blueprint.all` only affects the current file. Imported modules are not auto-blueprinted.
+
 ## Progress statistics
 
 To view formalization progress, use the `#blueprint_progress` command in Lean:
@@ -272,6 +300,12 @@ To inspect a specific declaration and its dependency subtree, use `#blueprint_st
 --   MyProject.mul       0/1   (0%)  Incomplete
 ```
 
+Or from the command line:
+
+```sh
+lake exe extract_blueprint status MyProject.add_comm MyProject.Module1
+```
+
 This works on any `@[blueprint]`-tagged declaration — theorems, lemmas, definitions, and inductives. The output shows:
 
 - **Status**: the node's own formalization status.
@@ -295,10 +329,10 @@ To see all incomplete nodes and how close they are to being unblocked, use `#blu
 ```lean
 #blueprint_incomplete
 -- Incomplete (4 nodes):
---   MyProject.mul       0/0 (100%)  MyProject.Algebra
---   MyProject.succ_add  2/2 (100%)  MyProject.Algebra
---   MyProject.add_comm  3/4  (75%)  MyProject.Topology
---   MyProject.mul_comm  1/2  (50%)  MyProject.Algebra
+--   MyProject.mul       0/0  (100%)
+--   MyProject.succ_add  2/2  (100%)
+--   MyProject.add_comm  3/4   (75%)
+--   MyProject.mul_comm  1/2   (50%)
 ```
 
 Each node shows how many of its blueprint dependencies are formalized. Nodes at **100%** are ready to work on immediately — all their dependencies are done. Nodes marked `(notReady := true)` are excluded.
@@ -329,11 +363,11 @@ MyProject.succ_add
 Status: Incomplete
 
 Depended on by (2 nodes):
-  MyProject.add_comm  3/4  (75%)  Incomplete  MyProject.Algebra
-  MyProject.flt       0/2   (0%)  Not ready   MyProject.Algebra
+  MyProject.add_comm  3/4  (75%)  Incomplete
+  MyProject.flt       0/2   (0%)  Not ready
 
 Would unblock (1 node):
-  MyProject.add_comm  3/4  (75%)  Incomplete  MyProject.Algebra
+  MyProject.add_comm  3/4  (75%)  Incomplete
 ```
 
 "Would unblock" lists incomplete nodes whose *only* remaining blocking dependency is the target node. Formalizing the target would make these nodes fully actionable (100% dependency completion in `#blueprint_incomplete`).

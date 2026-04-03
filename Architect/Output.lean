@@ -38,7 +38,7 @@ def Latex.input (file : System.FilePath) : Latex :=
   -- LaTeX interprets these as control sequences, so we replace backslashes with forward slashes.
   "\\input{" ++ "/".intercalate file.components ++ "}"
 
-variable {m} [Monad m] [MonadEnv m] [MonadError m]
+variable {m} [Monad m] [MonadEnv m] [MonadError m] [MonadOptions m]
 
 def preprocessLatex (s : String) : String :=
   s
@@ -54,9 +54,10 @@ def InferredUses.merge (inferredUsess : Array InferredUses) : InferredUses :=
 
 def NodePart.inferUses (part : NodePart) (latexLabel : String) (used : NameSet) : m InferredUses := do
   let env ← getEnv
+  let opts ← getOptions
   let uses := part.uses.foldl (·.insert ·) used |>.filter (· ∉ part.excludes)
   let mut usesLabels : Std.HashSet String := .ofArray <|
-    uses.toArray.filterMap fun c => (blueprintExt.find? env c).map (·.latexLabel)
+    uses.toArray.filterMap fun c => (findBlueprintNode? env opts c).map (·.latexLabel)
   usesLabels := usesLabels.erase latexLabel
   usesLabels := part.usesLabels.foldl (·.insert ·) usesLabels |>.filter (· ∉ part.excludesLabels)
   return { uses := usesLabels.toArray, leanOk := !uses.contains ``sorryAx }
@@ -207,8 +208,9 @@ def computeProgress (nodes : Array Node) : m ProgressStats := do
 def NodeWithPos.toLatex (node : NodeWithPos) : m Latex := do
   -- In the output, we merge the Lean nodes corresponding to the same LaTeX label.
   let env ← getEnv
+  let opts ← getOptions
   let allLeanNames := getLeanNamesOfLatexLabel env node.latexLabel
-  let allNodes := allLeanNames.filterMap fun name => blueprintExt.find? env name
+  let allNodes := allLeanNames.filterMap fun name => findBlueprintNode? env opts name
 
   let mut addLatex := ""
   addLatex := addLatex ++ "\\label{" ++ node.latexLabel ++ "}\n"
@@ -336,7 +338,9 @@ open Elab Command in
     logInfo m!"LaTeX of current module:\n{output.header ""}"
   | `(command| #show_blueprint $id:ident) => do
     let name ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo id
-    let some node := blueprintExt.find? (← getEnv) name | throwError "{name} does not have @[blueprint] attribute"
+    let env ← getEnv
+    let opts ← getOptions
+    let some node := findBlueprintNode? env opts name | throwError "{name} does not have @[blueprint] attribute"
     let art ← (← liftCoreM node.toNodeWithPos).toLatexArtifact
     logInfo m!"{art.content}"
   | `(command| #show_blueprint $label:str) => do
@@ -400,7 +404,9 @@ open Elab Command in
     logInfo m!"{json}"
   | `(command| #show_blueprint_json $id:ident) => do
     let name ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo id
-    let some node := blueprintExt.find? (← getEnv) name | throwError "{name} does not have @[blueprint] attribute"
+    let env ← getEnv
+    let opts ← getOptions
+    let some node := findBlueprintNode? env opts name | throwError "{name} does not have @[blueprint] attribute"
     let json := (← liftCoreM node.toNodeWithPos).toJson
     logInfo m!"{json}"
   | `(command| #show_blueprint_json $label:str) => do
@@ -428,15 +434,16 @@ syntax (name := blueprint_progress) "#blueprint_progress" (ppSpace blueprintProg
 open Elab Command in
 private def collectAllProgress : CommandElabM (ProgressStats × Array (Name × ProgressStats)) := do
   let env ← getEnv
+  let opts ← getOptions
   let mut aggregate := ProgressStats.empty
   let mut byModule : Array (Name × ProgressStats) := #[]
   for mod in env.allImportedModuleNames do
     if let some modIdx := env.getModuleIdx? mod then
-      let nodes := (blueprintExt.getModuleEntries env modIdx).map (·.2)
+      let nodes := (getModuleBlueprintNodes env opts modIdx).map (·.2)
       let modStats ← liftCoreM (computeProgress nodes)
       aggregate := aggregate.merge modStats
       byModule := byModule.push (mod, modStats)
-  let currentNodes := (blueprintExt.getEntries env).toArray.map (·.2)
+  let currentNodes := (getLocalBlueprintNodes env opts).map (·.2)
   let currentStats ← liftCoreM (computeProgress currentNodes)
   aggregate := aggregate.merge currentStats
   byModule := byModule.push (← liftCoreM getMainModule, currentStats)
@@ -445,7 +452,8 @@ private def collectAllProgress : CommandElabM (ProgressStats × Array (Name × P
 open Elab Command in
 private def collectLocalProgress : CommandElabM (ProgressStats × Array (Name × ProgressStats)) := do
   let env ← getEnv
-  let nodes := (blueprintExt.getEntries env).toArray.map (·.2)
+  let opts ← getOptions
+  let nodes := (getLocalBlueprintNodes env opts).map (·.2)
   let stats ← liftCoreM (computeProgress nodes)
   let modName ← liftCoreM getMainModule
   return (stats, #[(modName, stats)])
@@ -544,7 +552,7 @@ end Shared
 
 section Status
 
-variable {m} [Monad m] [MonadEnv m] [MonadError m]
+variable {m} [Monad m] [MonadEnv m] [MonadError m] [MonadOptions m]
 
 /-- Classify a single blueprint node as formalized, incomplete, or not ready. -/
 def classifyNode (node : Node) : m NodeStatus := do
@@ -629,7 +637,8 @@ private def collectExplicitUses (env : Environment) (part : NodePart) : NameSet 
 /-- Collect all blueprint dependencies of a node (both formalized and non-formalized). -/
 private def collectAllBlueprintDeps (name : Name) : m NameSet := do
   let env ← getEnv
-  let some node := blueprintExt.find? env name
+  let opts ← getOptions
+  let some node := findBlueprintNode? env opts name
     | throwError "no @[blueprint] node with name {name}"
   let (typeUsed, valueUsed) ← collectUsed name
   let mut allUsed := typeUsed.union valueUsed |>.erase ``sorryAx
@@ -637,17 +646,18 @@ private def collectAllBlueprintDeps (name : Name) : m NameSet := do
   if let some proof := node.proof then
     allUsed := (collectExplicitUses env proof).foldl (·.insert ·) allUsed
   allUsed := allUsed.erase name
-  return allUsed.filter fun n => (blueprintExt.find? env n).isSome
+  return allUsed.filter fun n => isBlueprintNode env opts n
 
 /-- Compute the formalization status of a specific blueprint node and its dependency subtree. -/
 def computeStatus (name : Name) : m StatusReport := do
   let env ← getEnv
-  let some node := blueprintExt.find? env name
+  let opts ← getOptions
+  let some node := findBlueprintNode? env opts name
     | throwError "no @[blueprint] node with name {name}"
   let selfStatus ← classifyNode node
   -- Collect all blueprint dependencies
   let allDeps ← collectAllBlueprintDeps name
-  let depNodes := allDeps.toArray.filterMap fun n => blueprintExt.find? env n
+  let depNodes := allDeps.toArray.filterMap fun n => findBlueprintNode? env opts n
   let depStats ← computeProgress depNodes
   -- Collect blocking (non-formalized) dependencies
   let mut blocking : Array NodeEntry := #[]
@@ -655,7 +665,7 @@ def computeStatus (name : Name) : m StatusReport := do
     let status ← classifyNode node
     unless status matches .formalized do
       let bDeps := (← collectAllBlueprintDeps node.name).toArray.filterMap fun n =>
-        blueprintExt.find? env n
+        findBlueprintNode? env opts n
       let bStats ← computeProgress bDeps
       blocking := blocking.push {
         name := node.name, status
@@ -679,7 +689,8 @@ open Elab Command in
   | `(command| #blueprint_status $id) => do
     let name ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo id
     let env ← getEnv
-    unless (blueprintExt.find? env name).isSome do
+    let opts ← getOptions
+    unless isBlueprintNode env opts name do
       throwError "'{name}' is not a @[blueprint] node"
     let report ← liftCoreM (computeStatus name)
     logInfo m!"{report}"
@@ -689,7 +700,7 @@ end Status
 
 section Next
 
-variable {m} [Monad m] [MonadEnv m] [MonadError m]
+variable {m} [Monad m] [MonadEnv m] [MonadError m] [MonadOptions m]
 
 /-- Report listing all incomplete blueprint nodes. -/
 structure IncompleteReport where
@@ -750,19 +761,21 @@ syntax (name := blueprint_incomplete) "#blueprint_incomplete" (ppSpace blueprint
 open Elab Command in
 private def collectAllModuleNodes : CommandElabM (Array (Name × Array Node)) := do
   let env ← getEnv
+  let opts ← getOptions
   let mut result : Array (Name × Array Node) := #[]
   for mod in env.allImportedModuleNames do
     if let some modIdx := env.getModuleIdx? mod then
-      let nodes := (blueprintExt.getModuleEntries env modIdx).map (·.2)
+      let nodes := (getModuleBlueprintNodes env opts modIdx).map (·.2)
       result := result.push (mod, nodes)
-  let currentNodes := (blueprintExt.getEntries env).toArray.map (·.2)
+  let currentNodes := (getLocalBlueprintNodes env opts).map (·.2)
   result := result.push (← liftCoreM getMainModule, currentNodes)
   return result
 
 open Elab Command in
 private def collectLocalModuleNodes : CommandElabM (Array (Name × Array Node)) := do
   let env ← getEnv
-  let nodes := (blueprintExt.getEntries env).toArray.map (·.2)
+  let opts ← getOptions
+  let nodes := (getLocalBlueprintNodes env opts).map (·.2)
   let modName ← liftCoreM getMainModule
   return #[(modName, nodes)]
 
@@ -780,7 +793,7 @@ end Next
 
 section Impact
 
-variable {m} [Monad m] [MonadEnv m] [MonadError m]
+variable {m} [Monad m] [MonadEnv m] [MonadError m] [MonadOptions m]
 
 /-- Impact report: reverse dependencies and nodes that would be unblocked. -/
 structure ImpactReport where
@@ -826,7 +839,8 @@ instance : ToMessageData ImpactReport where
 and which would become actionable. -/
 def computeImpact (targetName : Name) (moduleNodes : Array (Name × Array Node)) : m ImpactReport := do
   let env ← getEnv
-  let some targetNode := blueprintExt.find? env targetName
+  let opts ← getOptions
+  let some targetNode := findBlueprintNode? env opts targetName
     | throwError "no @[blueprint] node with name {targetName}"
   let selfStatus ← classifyNode targetNode
   let mut reverseDeps : Array NodeEntry := #[]
@@ -870,7 +884,8 @@ open Elab Command in
   | `(command| #blueprint_impact $id $[$opts:blueprintImpactOpt]*) => do
     let name ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo id
     let env ← getEnv
-    unless (blueprintExt.find? env name).isSome do
+    let leanOpts ← getOptions
+    unless isBlueprintNode env leanOpts name do
       throwError "'{name}' is not a @[blueprint] node"
     let optStrs := opts.map (·.raw.getSubstring?.get!.toString.trimAscii.toString)
     let isLocal := optStrs.contains "local"

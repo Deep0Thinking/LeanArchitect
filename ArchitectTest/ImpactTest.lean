@@ -1,9 +1,9 @@
 import Architect
 
 /-!
-# Impact & Status Test
+# Test
 
-A dependency graph for testing `#blueprint_status` and `#blueprint_impact`.
+A dependency graph for testing.
 
 ```
               main_thm
@@ -13,9 +13,9 @@ A dependency graph for testing `#blueprint_status` and `#blueprint_impact`.
  lemma_A1  lemma_A2    lemma_B1
       |        |       /       \
  lemma_A3  lemma_A4  lemma_B2  lemma_B3
-      \      /            |       |
-      core_lemma          util_lemma
-         |
+      \       /           \      / 
+      core_lemma         util_lemma
+          |
       base_def
 ```
 -/
@@ -81,16 +81,13 @@ theorem future_cor : base_def + 0 = 42 := by sorry
 
 end ImpactTest
 
-open ImpactTest in
+open ImpactTest
+
 #blueprint_impact core_lemma
 
-open ImpactTest in
 #blueprint_impact lemma_B1
 
-open ImpactTest in
 #blueprint_status lemma_A2
-
-open ImpactTest in
 
 #blueprint_status main_thm
 

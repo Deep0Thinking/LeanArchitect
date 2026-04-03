@@ -36,15 +36,17 @@ def BlueprintContent.order (l r : BlueprintContent) : Bool :=
 /-- Get blueprint contents of the current module. -/
 def getMainModuleBlueprintContents : CoreM (Array BlueprintContent) := do
   let env ← getEnv
-  let nodes ← (blueprintExt.getEntries env).toArray.mapM fun (_, node) => BlueprintContent.node <$> node.toNodeWithPos
+  let opts ← getOptions
+  let nodes ← (getLocalBlueprintNodes env opts).mapM fun (_, node) => BlueprintContent.node <$> node.toNodeWithPos
   let modDocs := (getMainModuleBlueprintDoc env).toArray.map BlueprintContent.modDoc
   return (nodes ++ modDocs).qsort BlueprintContent.order
 
 /-- Get blueprint contents of an imported module. -/
 def getBlueprintContents (module : Name) : CoreM (Array BlueprintContent) := do
   let env ← getEnv
+  let opts ← getOptions
   let some modIdx := env.getModuleIdx? module | return #[]
-  let nodes ← (blueprintExt.getModuleEntries env modIdx).mapM fun (_, node) => BlueprintContent.node <$> node.toNodeWithPos
+  let nodes ← (getModuleBlueprintNodes env opts modIdx).mapM fun (_, node) => BlueprintContent.node <$> node.toNodeWithPos
   let modDocs := (getModuleBlueprintDoc? env module).getD #[] |>.map BlueprintContent.modDoc
   return (nodes ++ modDocs).qsort BlueprintContent.order
 
