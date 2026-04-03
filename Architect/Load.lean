@@ -47,14 +47,14 @@ Otherwise, also includes nodes from all their imports. -/
 def progressOfImportModules (modules : Array Name) (options : Options) (localOnly : Bool := false) : IO ProgressReport :=
   runEnvOfImports modules options do
     let env ← getEnv
+    let opts ← getOptions
     let mut aggregate := ProgressStats.empty
     let mut byModule : Array (Name × ProgressStats) := #[]
-    -- Determine which modules to include
     let targetModules := if localOnly then modules
       else env.allImportedModuleNames
     for mod in targetModules do
       if let some modIdx := env.getModuleIdx? mod then
-        let nodes := (blueprintExt.getModuleEntries env modIdx).map (·.2)
+        let nodes := (getModuleBlueprintNodes env opts modIdx).map (·.2)
         let modStats ← computeProgress nodes
         aggregate := aggregate.merge modStats
         byModule := byModule.push (mod, modStats)
@@ -69,11 +69,12 @@ If `localOnly` is true, only considers nodes defined in the given modules. -/
 def incompleteOfImportModules (modules : Array Name) (options : Options) (localOnly : Bool := false) : IO IncompleteReport :=
   runEnvOfImports modules options do
     let env ← getEnv
+    let opts ← getOptions
     let mut moduleNodes : Array (Name × Array Node) := #[]
     let targetModules := if localOnly then modules else env.allImportedModuleNames
     for mod in targetModules do
       if let some modIdx := env.getModuleIdx? mod then
-        let nodes := (blueprintExt.getModuleEntries env modIdx).map (·.2)
+        let nodes := (getModuleBlueprintNodes env opts modIdx).map (·.2)
         moduleNodes := moduleNodes.push (mod, nodes)
     collectIncomplete moduleNodes
 
@@ -82,11 +83,12 @@ If `localOnly` is true, only considers nodes defined in the given modules. -/
 def impactOfImportModules (modules : Array Name) (constName : Name) (options : Options) (localOnly : Bool := false) : IO ImpactReport :=
   runEnvOfImports modules options do
     let env ← getEnv
+    let opts ← getOptions
     let mut moduleNodes : Array (Name × Array Node) := #[]
     let targetModules := if localOnly then modules else env.allImportedModuleNames
     for mod in targetModules do
       if let some modIdx := env.getModuleIdx? mod then
-        let nodes := (blueprintExt.getModuleEntries env modIdx).map (·.2)
+        let nodes := (getModuleBlueprintNodes env opts modIdx).map (·.2)
         moduleNodes := moduleNodes.push (mod, nodes)
     computeImpact constName moduleNodes
 
