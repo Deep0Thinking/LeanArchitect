@@ -130,11 +130,15 @@ instance : ToString ProgressStats where
     let p2 := round s.containsSorry
     let p3 := if s.total == 0 then 0 else 100 - p1 - p2
     let header := "Blueprint Progress"
+    let tw := s!"{s.total}".length
+    let pad (n : Nat) := "".pushn ' ' (tw - s!"{n}".length)
+    let ppad (p : Nat) := "".pushn ' ' (3 - s!"{p}".length)
+    let totalPad := "".pushn ' ' (tw + 1)
     let lines := #[
-      s!"Total:        {s.total} nodes",
-      s!"Formalized:   {s.sorryFree} ({p1}%)",
-      s!"Incomplete:   {s.containsSorry} ({p2}%)",
-      s!"Not ready:    {s.notReady} ({p3}%)"
+      s!"Total:        {totalPad}{s.total} nodes",
+      s!"Formalized:   {pad s.sorryFree}{s.sorryFree}/{s.total} {ppad p1}({p1}%)",
+      s!"Incomplete:   {pad s.containsSorry}{s.containsSorry}/{s.total} {ppad p2}({p2}%)",
+      s!"Not ready:    {pad s.notReady}{s.notReady}/{s.total} {ppad p3}({p3}%)"
     ]
     let maxWidth := lines.foldl (fun acc l => max acc l.length) header.length
     let separator := "".pushn '─' maxWidth
@@ -462,9 +466,8 @@ open Elab Command in
 
 end Progress
 
-section Status
-
-variable {m} [Monad m] [MonadEnv m] [MonadError m]
+section Shared
+open Lean
 
 /-- Classification of a single blueprint node's formalization status. -/
 inductive NodeStatus where
@@ -475,6 +478,73 @@ instance : ToString NodeStatus where
     | .formalized => "Formalized"
     | .incomplete => "Incomplete"
     | .notReady => "Not ready"
+
+/-- A blueprint node entry with status and dependency completion data.
+Used uniformly for blocking deps, reverse deps, unblocked nodes, and incomplete nodes. -/
+structure NodeEntry where
+  name : Name
+  status : NodeStatus
+  depDone : Nat
+  depTotal : Nat
+  module : Name
+
+/-- Compute the percentage of formalized deps, rounding to nearest. -/
+private def depPct (done total : Nat) : Nat :=
+  if total == 0 then 100 else (done * 100 + total / 2) / total
+
+/-- Column widths for aligned dep-fraction formatting. -/
+structure DepFracWidths where
+  dw : Nat  -- max width of numerator
+  tw : Nat  -- max width of denominator
+  pw : Nat  -- max width of percentage
+
+/-- Compute dep-fraction column widths from an array of `NodeEntry`. -/
+def DepFracWidths.compute (entries : Array NodeEntry) : DepFracWidths where
+  dw := entries.foldl (fun acc e => max acc s!"{e.depDone}".length) 0
+  tw := entries.foldl (fun acc e => max acc s!"{e.depTotal}".length) 0
+  pw := entries.foldl (fun acc e => max acc s!"{depPct e.depDone e.depTotal}".length) 0
+
+/-- Format a dependency fraction with aligned `/` and `%` columns. -/
+private def fmtDepFrac (done total : Nat) (w : DepFracWidths) : String :=
+  let pct := depPct done total
+  let dp := "".pushn ' ' (w.dw - s!"{done}".length)
+  let tp := "".pushn ' ' (w.tw - s!"{total}".length)
+  let pp := "".pushn ' ' (w.pw - s!"{pct}".length)
+  s!"{dp}{done}/{tp}{total}  {pp}({pct}%)"
+
+/-- Format a list of `NodeEntry` as aligned rows: `name  frac  status  module` (for CLI). -/
+private def fmtNodeEntryList (entries : Array NodeEntry) : String :=
+  let maxNameWidth := entries.foldl (fun acc e => max acc (toString e.name).length) 0
+  let statusWidth := entries.foldl (fun acc e => max acc (toString e.status).length) 0
+  let fw := DepFracWidths.compute entries
+  let lines := entries.map fun e =>
+    let nameStr := toString e.name
+    let namePad := "".pushn ' ' (maxNameWidth - nameStr.length)
+    let statusStr := toString e.status
+    let statusPad := "".pushn ' ' (statusWidth - statusStr.length)
+    s!"  {nameStr}{namePad}  {fmtDepFrac e.depDone e.depTotal fw}  {statusStr}{statusPad}  {e.module}"
+  "\n".intercalate lines.toList
+
+/-- Format a list of `NodeEntry` as aligned `MessageData` rows: `name  frac  status` (for interactive). -/
+private def fmtNodeEntryListMsg (entries : Array NodeEntry) (header : MessageData) : MessageData :=
+  let maxNameWidth := entries.foldl (fun acc e => max acc (toString e.name).length) 0
+  let fw := DepFracWidths.compute entries
+  entries.foldl (init := header) fun acc e =>
+    let namePad := "".pushn ' ' (maxNameWidth - (toString e.name).length)
+    acc ++ m!"\n  {Expr.const e.name []}{namePad}  {fmtDepFrac e.depDone e.depTotal fw}  {e.status}"
+
+/-- Look up the module a constant was defined in.
+Falls back to `env.header.mainModule` for constants defined in the current file. -/
+private def getModuleOf (env : Environment) (name : Name) : Name :=
+  match env.getModuleIdxFor? name with
+  | some idx => env.allImportedModuleNames[idx.toNat]!
+  | none => env.header.mainModule
+
+end Shared
+
+section Status
+
+variable {m} [Monad m] [MonadEnv m] [MonadError m]
 
 /-- Classify a single blueprint node as formalized, incomplete, or not ready. -/
 def classifyNode (node : Node) : m NodeStatus := do
@@ -487,7 +557,7 @@ structure StatusReport where
   name : Name
   selfStatus : NodeStatus
   depStats : ProgressStats
-  blocking : Array (Name × NodeStatus)
+  blocking : Array NodeEntry
 
 private def formatStatusReport (r : StatusReport) : String :=
   let header := s!"{r.name}\nStatus: {r.selfStatus}"
@@ -500,19 +570,18 @@ private def formatStatusReport (r : StatusReport) : String :=
     let p1 := round s.sorryFree
     let p2 := round s.containsSorry
     let p3 := if s.total == 0 then 0 else 100 - p1 - p2
+    let tw := s!"{s.total}".length
+    let pad (n : Nat) := "".pushn ' ' (tw - s!"{n}".length)
+    let ppad (p : Nat) := "".pushn ' ' (3 - s!"{p}".length)
     let depSection := s!"\n\nDependencies ({s.total} nodes):"
-      ++ s!"\n  Formalized:   {s.sorryFree} ({p1}%)"
-      ++ s!"\n  Incomplete:   {s.containsSorry} ({p2}%)"
-      ++ s!"\n  Not ready:    {s.notReady} ({p3}%)"
+      ++ s!"\n  Formalized:   {pad s.sorryFree}{s.sorryFree}/{s.total} {ppad p1}({p1}%)"
+      ++ s!"\n  Incomplete:   {pad s.containsSorry}{s.containsSorry}/{s.total} {ppad p2}({p2}%)"
+      ++ s!"\n  Not ready:    {pad s.notReady}{s.notReady}/{s.total} {ppad p3}({p3}%)"
     let blockingSection :=
       if r.blocking.isEmpty then ""
       else
-        let maxNameWidth := r.blocking.foldl (fun acc (n, _) => max acc (toString n).length) 0
-        let lines := r.blocking.map fun (name, status) =>
-          let nameStr := toString name
-          let pad := "".pushn ' ' (maxNameWidth - nameStr.length)
-          s!"  {nameStr}{pad}  {status}"
-        "\n\nBlocking:\n" ++ "\n".intercalate lines.toList
+        fmtNodeEntryList r.blocking
+        |> "\n\nBlocking ({r.blocking.size} nodes):\n".append
     header ++ depSection ++ blockingSection
 
 instance : ToString StatusReport where
@@ -532,19 +601,16 @@ instance : ToMessageData StatusReport where
       let p1 := round s.sorryFree
       let p2 := round s.containsSorry
       let p3 := if s.total == 0 then 0 else 100 - p1 - p2
+      let tw := s!"{s.total}".length
+      let pad (n : Nat) := "".pushn ' ' (tw - s!"{n}".length)
+      let ppad (p : Nat) := "".pushn ' ' (3 - s!"{p}".length)
       let depSection := m!"\n\nDependencies ({s.total} nodes):"
-        ++ m!"\n  Formalized:   {s.sorryFree} ({p1}%)"
-        ++ m!"\n  Incomplete:   {s.containsSorry} ({p2}%)"
-        ++ m!"\n  Not ready:    {s.notReady} ({p3}%)"
+        ++ m!"\n  Formalized:   {pad s.sorryFree}{s.sorryFree}/{s.total} {ppad p1}({p1}%)"
+        ++ m!"\n  Incomplete:   {pad s.containsSorry}{s.containsSorry}/{s.total} {ppad p2}({p2}%)"
+        ++ m!"\n  Not ready:    {pad s.notReady}{s.notReady}/{s.total} {ppad p3}({p3}%)"
       let blockingSection :=
         if r.blocking.isEmpty then m!""
-        else
-          let maxNameWidth := r.blocking.foldl (fun acc (n, _) => max acc (toString n).length) 0
-          let lines := r.blocking.foldl (init := m!"\n\nBlocking:") fun acc (name, status) =>
-            let nameStr := toString name
-            let pad := "".pushn ' ' (maxNameWidth - nameStr.length)
-            acc ++ m!"\n  {Expr.const name []}{pad}  {status}"
-          lines
+        else fmtNodeEntryListMsg r.blocking m!"\n\nBlocking ({r.blocking.size} nodes):"
       header ++ depSection ++ blockingSection
 
 /-- Collect explicit uses from a NodePart, resolving both name-based and label-based references. -/
@@ -560,36 +626,48 @@ private def collectExplicitUses (env : Environment) (part : NodePart) : NameSet 
   let labelNames := labelNames.filter (!excludeLabelNames.contains ·)
   names.union labelNames
 
+/-- Collect all blueprint dependencies of a node (both formalized and non-formalized). -/
+private def collectAllBlueprintDeps (name : Name) : m NameSet := do
+  let env ← getEnv
+  let some node := blueprintExt.find? env name
+    | throwError "no @[blueprint] node with name {name}"
+  let (typeUsed, valueUsed) ← collectUsed name
+  let mut allUsed := typeUsed.union valueUsed |>.erase ``sorryAx
+  allUsed := (collectExplicitUses env node.statement).foldl (·.insert ·) allUsed
+  if let some proof := node.proof then
+    allUsed := (collectExplicitUses env proof).foldl (·.insert ·) allUsed
+  allUsed := allUsed.erase name
+  return allUsed.filter fun n => (blueprintExt.find? env n).isSome
+
 /-- Compute the formalization status of a specific blueprint node and its dependency subtree. -/
 def computeStatus (name : Name) : m StatusReport := do
   let env ← getEnv
   let some node := blueprintExt.find? env name
     | throwError "no @[blueprint] node with name {name}"
   let selfStatus ← classifyNode node
-  -- Get inferred transitive blueprint dependencies
-  let (typeUsed, valueUsed) ← collectUsed name
-  let mut allUsed := typeUsed.union valueUsed |>.erase ``sorryAx
-  -- Merge explicit uses from statement and proof
-  allUsed := (collectExplicitUses env node.statement).foldl (·.insert ·) allUsed
-  if let some proof := node.proof then
-    allUsed := (collectExplicitUses env proof).foldl (·.insert ·) allUsed
-  -- Remove self-reference
-  allUsed := allUsed.erase name
-  -- Filter to only blueprint nodes
-  let depNodes := allUsed.toArray.filterMap fun n => blueprintExt.find? env n
+  -- Collect all blueprint dependencies
+  let allDeps ← collectAllBlueprintDeps name
+  let depNodes := allDeps.toArray.filterMap fun n => blueprintExt.find? env n
   let depStats ← computeProgress depNodes
   -- Collect blocking (non-formalized) dependencies
-  let mut blocking : Array (Name × NodeStatus) := #[]
+  let mut blocking : Array NodeEntry := #[]
   for node in depNodes do
     let status ← classifyNode node
     unless status matches .formalized do
-      blocking := blocking.push (node.name, status)
+      let bDeps := (← collectAllBlueprintDeps node.name).toArray.filterMap fun n =>
+        blueprintExt.find? env n
+      let bStats ← computeProgress bDeps
+      blocking := blocking.push {
+        name := node.name, status
+        depDone := bStats.sorryFree, depTotal := bStats.total
+        module := getModuleOf env node.name
+      }
   -- Sort blocking: notReady first, then incomplete, alphabetical within each
-  let sortedBlocking := blocking.qsort fun (n1, s1) (n2, s2) =>
-    match s1, s2 with
+  let sortedBlocking := blocking.qsort fun a b =>
+    match a.status, b.status with
     | .notReady, .incomplete => true
     | .incomplete, .notReady => false
-    | _, _ => n1.toString < n2.toString
+    | _, _ => a.name.toString < b.name.toString
   return { name, selfStatus, depStats, blocking := sortedBlocking }
 
 /-- Shows formalization status of a specific blueprint node and its dependency subtree.
@@ -613,45 +691,37 @@ section Next
 
 variable {m} [Monad m] [MonadEnv m] [MonadError m]
 
-/-- An incomplete blueprint node with its dependency completion percentage. -/
-structure IncompleteNode where
-  name : Name
-  module : Name
-  depPct : Nat  -- percentage of deps formalized (0-100)
-
 /-- Report listing all incomplete blueprint nodes. -/
-structure NextReport where
-  nodes : Array IncompleteNode
+structure IncompleteReport where
+  nodes : Array NodeEntry
 
-instance : ToString NextReport where
+instance : ToString IncompleteReport where
   toString r :=
     if r.nodes.isEmpty then "No incomplete nodes."
     else
       let maxNameWidth := r.nodes.foldl (fun acc n => max acc (toString n.name).length) 0
+      let fw := DepFracWidths.compute r.nodes
       let lines := r.nodes.map fun node =>
         let nameStr := toString node.name
         let pad := "".pushn ' ' (maxNameWidth - nameStr.length)
-        let pctStr := s!"({node.depPct}%)"
-        let pctPad := "".pushn ' ' (6 - pctStr.length)
-        s!"  {nameStr}{pad}  {pctPad}{pctStr}  {node.module}"
+        s!"  {nameStr}{pad}  {fmtDepFrac node.depDone node.depTotal fw}  {node.module}"
       s!"Incomplete ({r.nodes.size} nodes):\n" ++ "\n".intercalate lines.toList
 
 open Lean in
-instance : ToMessageData NextReport where
+instance : ToMessageData IncompleteReport where
   toMessageData r :=
     if r.nodes.isEmpty then m!"No incomplete nodes."
     else
       let maxNameWidth := r.nodes.foldl (fun acc n => max acc (toString n.name).length) 0
+      let fw := DepFracWidths.compute r.nodes
       r.nodes.foldl (init := m!"Incomplete ({r.nodes.size} nodes):") fun acc node =>
         let pad := "".pushn ' ' (maxNameWidth - (toString node.name).length)
-        let pctStr := s!"({node.depPct}%)"
-        let pctPad := "".pushn ' ' (6 - pctStr.length)
-        acc ++ m!"\n  {Expr.const node.name []}{pad}  {pctPad}{pctStr}  {node.module}"
+        acc ++ m!"\n  {Expr.const node.name []}{pad}  {fmtDepFrac node.depDone node.depTotal fw}"
 
-/-- Collect all incomplete blueprint nodes with their dependency completion percentage. -/
-def collectIncomplete (moduleNodes : Array (Name × Array Node)) : m NextReport := do
+/-- Collect all incomplete blueprint nodes with their dependency completion fraction. -/
+def collectIncomplete (moduleNodes : Array (Name × Array Node)) : m IncompleteReport := do
   let env ← getEnv
-  let mut result : Array IncompleteNode := #[]
+  let mut result : Array NodeEntry := #[]
   for (mod, nodes) in moduleNodes do
     for node in nodes do
       if node.notReady then continue
@@ -659,21 +729,23 @@ def collectIncomplete (moduleNodes : Array (Name × Array Node)) : m NextReport 
       let status ← classifyNode node
       if status matches .formalized then continue
       let report ← computeStatus node.name
-      let depPct := if report.depStats.total == 0 then 100
-        else (report.depStats.sorryFree * 100 + report.depStats.total / 2) / report.depStats.total
-      result := result.push { name := node.name, module := mod, depPct }
+      let depDone := report.depStats.sorryFree
+      let depTotal := report.depStats.total
+      result := result.push { name := node.name, status, module := mod, depDone, depTotal }
   -- Sort by percentage descending (most ready first), then by name
   let sortedNodes := result.qsort fun a b =>
-    if a.depPct != b.depPct then a.depPct > b.depPct
+    let aPct := depPct a.depDone a.depTotal
+    let bPct := depPct b.depDone b.depTotal
+    if aPct != bPct then aPct > bPct
     else a.name.toString < b.name.toString
   return { nodes := sortedNodes }
 
-/-- Shows actionable blueprint nodes: incomplete nodes whose all dependencies are formalized.
-- `#blueprint_next` shows actionable nodes across all modules.
-- `#blueprint_next local` shows actionable nodes in the current module only. -/
-declare_syntax_cat blueprintNextOpt
-syntax &"local" : blueprintNextOpt
-syntax (name := blueprint_next) "#blueprint_next" (ppSpace blueprintNextOpt)* : command
+/-- Shows incomplete blueprint nodes sorted by dependency completion.
+- `#blueprint_incomplete` shows incomplete nodes across all modules.
+- `#blueprint_incomplete local` shows incomplete nodes in the current module only. -/
+declare_syntax_cat blueprintIncompleteOpt
+syntax &"local" : blueprintIncompleteOpt
+syntax (name := blueprint_incomplete) "#blueprint_incomplete" (ppSpace blueprintIncompleteOpt)* : command
 
 open Elab Command in
 private def collectAllModuleNodes : CommandElabM (Array (Name × Array Node)) := do
@@ -695,8 +767,8 @@ private def collectLocalModuleNodes : CommandElabM (Array (Name × Array Node)) 
   return #[(modName, nodes)]
 
 open Elab Command in
-@[command_elab blueprint_next] def elabBlueprintNext : CommandElab
-  | `(command| #blueprint_next $[$opts:blueprintNextOpt]*) => do
+@[command_elab blueprint_incomplete] def elabBlueprintIncomplete : CommandElab
+  | `(command| #blueprint_incomplete $[$opts:blueprintIncompleteOpt]*) => do
     let optStrs := opts.map (·.raw.getSubstring?.get!.toString.trimAscii.toString)
     let isLocal := optStrs.contains "local"
     let moduleNodes ← if isLocal then collectLocalModuleNodes else collectAllModuleNodes
@@ -705,6 +777,109 @@ open Elab Command in
   | _ => throwUnsupportedSyntax
 
 end Next
+
+section Impact
+
+variable {m} [Monad m] [MonadEnv m] [MonadError m]
+
+/-- Impact report: reverse dependencies and nodes that would be unblocked. -/
+structure ImpactReport where
+  name : Name
+  selfStatus : NodeStatus
+  reverseDeps : Array NodeEntry
+  wouldUnblock : Array NodeEntry
+
+private def formatImpactReport (r : ImpactReport) : String :=
+  let header := s!"{r.name}\nStatus: {r.selfStatus}"
+  let revSection :=
+    if r.reverseDeps.isEmpty then "\n\nNo nodes depend on this."
+    else
+      fmtNodeEntryList r.reverseDeps
+      |> "\n\nDepended on by ({r.reverseDeps.size} nodes):\n".append
+  let unblockSection :=
+    if r.wouldUnblock.isEmpty then ""
+    else
+      fmtNodeEntryList r.wouldUnblock
+      |> "\n\nWould unblock ({r.wouldUnblock.size} nodes):\n".append
+  header ++ revSection ++ unblockSection
+
+instance : ToString ImpactReport where
+  toString := formatImpactReport
+
+open Lean in
+instance : ToMessageData ImpactReport where
+  toMessageData r :=
+    let header := m!"{Expr.const r.name []}\nStatus: {r.selfStatus}"
+    let revSection :=
+      if r.reverseDeps.isEmpty then m!"\n\nNo nodes depend on this."
+      else
+        fmtNodeEntryListMsg r.reverseDeps
+          m!"\n\nDepended on by ({r.reverseDeps.size} nodes):"
+    let unblockSection :=
+      if r.wouldUnblock.isEmpty then m!""
+      else
+        fmtNodeEntryListMsg r.wouldUnblock
+          m!"\n\nWould unblock ({r.wouldUnblock.size} nodes):"
+    header ++ revSection ++ unblockSection
+
+/-- Compute the impact of formalizing a specific blueprint node: which nodes depend on it
+and which would become actionable. -/
+def computeImpact (targetName : Name) (moduleNodes : Array (Name × Array Node)) : m ImpactReport := do
+  let env ← getEnv
+  let some targetNode := blueprintExt.find? env targetName
+    | throwError "no @[blueprint] node with name {targetName}"
+  let selfStatus ← classifyNode targetNode
+  let mut reverseDeps : Array NodeEntry := #[]
+  let mut wouldUnblock : Array NodeEntry := #[]
+  for (mod, nodes) in moduleNodes do
+    for node in nodes do
+      if node.name == targetName then continue
+      unless env.contains node.name do continue
+      -- Check if targetName is among ALL blueprint dependencies (not just blocking)
+      let deps ← collectAllBlueprintDeps node.name
+      unless deps.contains targetName do continue
+      let status ← classifyNode node
+      let report ← computeStatus node.name
+      let depDone := report.depStats.sorryFree
+      let depTotal := report.depStats.total
+      reverseDeps := reverseDeps.push { name := node.name, status, depDone, depTotal, module := mod }
+      -- Would unblock: incomplete node whose only blocking dep is the target
+      if status matches .incomplete then
+        if report.blocking.size == 1 && report.blocking.back?.any (·.name == targetName) then
+          wouldUnblock := wouldUnblock.push { name := node.name, status, depDone, depTotal, module := mod }
+  -- Sort reverse deps: notReady first, then incomplete, alphabetical within each
+  let sortedRevDeps := reverseDeps.qsort fun a b =>
+    match a.status, b.status with
+    | .notReady, NodeStatus.incomplete => true
+    | NodeStatus.incomplete, .notReady => false
+    | _, _ => a.name.toString < b.name.toString
+  -- Sort would-unblock alphabetically
+  let sortedUnblock := wouldUnblock.qsort fun a b => a.name.toString < b.name.toString
+  return { name := targetName, selfStatus, reverseDeps := sortedRevDeps, wouldUnblock := sortedUnblock }
+
+/-- Shows the impact of formalizing a specific blueprint node: which nodes depend on it
+and which would become actionable.
+- `#blueprint_impact name` searches all imported modules.
+- `#blueprint_impact name local` searches only the current module. -/
+declare_syntax_cat blueprintImpactOpt
+syntax &"local" : blueprintImpactOpt
+syntax (name := blueprint_impact) "#blueprint_impact" ppSpace ident (ppSpace blueprintImpactOpt)* : command
+
+open Elab Command in
+@[command_elab blueprint_impact] def elabBlueprintImpact : CommandElab
+  | `(command| #blueprint_impact $id $[$opts:blueprintImpactOpt]*) => do
+    let name ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo id
+    let env ← getEnv
+    unless (blueprintExt.find? env name).isSome do
+      throwError "'{name}' is not a @[blueprint] node"
+    let optStrs := opts.map (·.raw.getSubstring?.get!.toString.trimAscii.toString)
+    let isLocal := optStrs.contains "local"
+    let moduleNodes ← if isLocal then collectLocalModuleNodes else collectAllModuleNodes
+    let report ← liftCoreM (computeImpact name moduleNodes)
+    logInfo m!"{report}"
+  | _ => throwUnsupportedSyntax
+
+end Impact
 
 open IO
 
