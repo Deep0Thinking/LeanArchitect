@@ -22,9 +22,9 @@ A dependency graph for testing.
 
 set_option warn.sorry false
 
-namespace ImpactTest
+namespace CommandsTest
 
-@[blueprint (statement := /-- The base definition everything builds on. -/)]
+/-- -/
 def base_def : Nat := 42
 
 @[blueprint (statement := /-- The core lemma used by many paths. -/)
@@ -79,9 +79,9 @@ theorem main_thm : base_def = 42 := by sorry
   (notReady := true)]
 theorem future_cor : base_def + 0 = 42 := by sorry
 
-end ImpactTest
+end CommandsTest
 
-open ImpactTest
+open CommandsTest
 
 #blueprint_impact core_lemma
 
@@ -94,3 +94,7 @@ open ImpactTest
 #blueprint_incomplete
 
 #blueprint_progress
+
+set_option blueprint.all true
+
+#show_blueprint
