@@ -516,7 +516,7 @@ def DepFracWidths.compute (entries : Array NodeEntry) : DepFracWidths where
   pw := entries.foldl (fun acc e => max acc s!"{depPct e.depDone e.depTotal}".length) 0
 
 /-- Format a dependency fraction with aligned `/` and `%` columns. -/
-private def fmtDepFrac (done total : Nat) (w : DepFracWidths) : String :=
+def fmtDepFrac (done total : Nat) (w : DepFracWidths) : String :=
   let pct := depPct done total
   let dp := "".pushn ' ' (w.dw - s!"{done}".length)
   let tp := "".pushn ' ' (w.tw - s!"{total}".length)
@@ -537,7 +537,7 @@ private def fmtNodeEntryList (entries : Array NodeEntry) : String :=
   "\n".intercalate lines.toList
 
 /-- Format a list of `NodeEntry` as aligned `MessageData` rows: `name  frac  status` (for interactive). -/
-private def fmtNodeEntryListMsg (entries : Array NodeEntry) (header : MessageData) : MessageData :=
+def fmtNodeEntryListMsg (entries : Array NodeEntry) (header : MessageData) : MessageData :=
   let maxNameWidth := entries.foldl (fun acc e => max acc (toString e.name).length) 0
   let fw := DepFracWidths.compute entries
   entries.foldl (init := header) fun acc e =>
@@ -570,7 +570,7 @@ structure StatusReport where
   depStats : ProgressStats
   blocking : Array NodeEntry
 
-private def formatStatusReport (r : StatusReport) : String :=
+def formatStatusReport (r : StatusReport) : String :=
   let header := s!"{r.name}\nStatus: {r.selfStatus}"
   if r.depStats.total == 0 then
     header ++ "\n\nNo dependencies."
@@ -805,7 +805,7 @@ structure ImpactReport where
   reverseDeps : Array NodeEntry
   wouldUnblock : Array NodeEntry
 
-private def formatImpactReport (r : ImpactReport) : String :=
+def formatImpactReport (r : ImpactReport) : String :=
   let header := s!"{r.name}\nStatus: {r.selfStatus}"
   let revSection :=
     if r.reverseDeps.isEmpty then "\n\nNo nodes depend on this."

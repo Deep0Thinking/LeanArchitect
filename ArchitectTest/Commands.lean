@@ -1,4 +1,8 @@
+module
+
 import Architect
+
+public section
 
 /-!
 # Test
@@ -25,7 +29,7 @@ set_option warn.sorry false
 namespace CommandsTest
 
 /-- -/
-def base_def : Nat := 42
+@[expose] def base_def : Nat := 42
 
 @[blueprint (statement := /-- The core lemma used by many paths. -/)
   (uses := [base_def])]

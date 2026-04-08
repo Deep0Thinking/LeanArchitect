@@ -1,4 +1,8 @@
+module
+
 import Architect
+
+public section
 
 /-!
 # Auto-Blueprint Test
