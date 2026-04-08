@@ -17,11 +17,9 @@ initialize moduleBlueprintDocExt :
     SimplePersistentEnvExtension ModuleDoc (PersistentArray ModuleDoc) ← registerSimplePersistentEnvExtension {
   addImportedFn := fun _ => {}
   addEntryFn    := fun s e => s.push e
-  exportEntriesFnEx? := some fun _ _ es level =>
-    if level < .server then
-      #[]
-    else
-      es.toArray
+  exportEntriesFnEx? := some fun _ _ es =>
+    let ents := es.toArray
+    { exported := #[], server := ents, «private» := ents }
 }
 
 def addMainModuleBlueprintDoc (env : Environment) (doc : ModuleDoc) : Environment :=

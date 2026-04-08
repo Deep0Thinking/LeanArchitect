@@ -70,7 +70,7 @@ elab "blueprint_using" " [" ids:ident,* "]" : tactic => do
     let used ← realizeGlobalConstNoOverloadWithInfo id
     let info ← getConstInfo used
     -- Instantiate universe level parameters with 0, to avoid errors
-    let lvls := List.replicate info.numLevelParams levelZero
+    let lvls := List.replicate info.numLevelParams Level.zero
     let ty := info.instantiateTypeLevelParams lvls
     let const := mkConst used lvls
     liftMetaTactic1 fun g => do
