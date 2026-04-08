@@ -1,6 +1,9 @@
-import Lean
-import Batteries.Lean.NameMapAttribute
+module
 
+public import Lean
+public meta import Batteries.Lean.NameMapAttribute
+
+public meta section
 
 open Lean Elab
 

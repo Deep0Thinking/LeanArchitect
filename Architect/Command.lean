@@ -1,5 +1,8 @@
-import Lean
+module
 
+public import Lean
+
+public meta section
 
 open Lean Parser Elab Command
 

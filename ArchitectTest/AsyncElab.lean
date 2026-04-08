@@ -1,7 +1,11 @@
+module
+
+public import Lean
+public meta import Std.Time.DateTime.Timestamp
 import Architect
 
 open Lean Elab Term Std.Time in
-elab "now_ms%" : term => do
+local elab "now_ms%" : term => do
   -- Synchronize env
   let env := (← getEnv).checked.get
   let hasC := env.constants.contains `c
@@ -15,9 +19,9 @@ elab "now_ms%" : term => do
 #guard_msgs in
 def old := now_ms%
 
-theorem a : True := by /-- a -/ sleep 1000; trivial
-theorem b : True := by /-- b -/ sleep 1000; trivial
-theorem c : True := by /-- c -/ sleep 1000; trivial
+public theorem a : True := by /-- a -/ sleep 1000; trivial
+public theorem b : True := by /-- b -/ sleep 1000; trivial
+public theorem c : True := by /-- c -/ sleep 1000; trivial
 
 /-- info: Contains `c`: true -/
 #guard_msgs in

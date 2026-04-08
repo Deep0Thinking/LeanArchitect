@@ -1,6 +1,8 @@
-import Lean
-import Architect.Content
+module
 
+public import Architect.Content
+
+public meta section
 
 open Lean Meta Elab
 

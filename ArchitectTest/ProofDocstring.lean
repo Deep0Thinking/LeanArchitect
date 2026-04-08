@@ -1,5 +1,9 @@
+module
+
 import Architect
 import ArchitectTest.MyNat
+
+public section
 
 -- Test regular proof docstring
 

@@ -1,7 +1,10 @@
-import Lean
-import Batteries.Lean.NameMapAttribute
-import Architect.Basic
+module
 
+public import Lean
+public meta import Batteries.Lean.NameMapAttribute
+public import Architect.Basic
+
+public meta section
 
 open Lean Elab Tactic Meta
 
@@ -42,6 +45,9 @@ def getProofDocString (env : Environment) (name : Name) : String :=
 
 elab (name := tacticDocComment) docComment:plainDocComment t:tactic : tactic => do
   let some name ← Term.getDeclName? | throwError "could not get declaration name"
+  if isPrivateName name then
+    -- TODO: why?
+    throwError "cannot have proof docstrings in private names (this is a bug, not a feature)"
   let doc := (← getDocStringText ⟨docComment⟩).trimAscii.copy
   modifyEnv fun env => addProofDocString env name doc
   -- NOTE: an alternative approach is to remove `t:tactic` and `evalTactic t`.

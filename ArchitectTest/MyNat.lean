@@ -1,4 +1,8 @@
+module
+
 import Architect
+
+public section
 
 @[blueprint (statement := /-- Natural numbers. -/)]
 inductive MyNat : Type where
@@ -73,6 +77,7 @@ open Lean Architect in
 run_meta
   let json ← mainModuleToJson
   let currFile ← (← getSrcSearchPath).findWithExt "lean" (← getEnv).header.mainModule
+  let lineOffset := 7
   assert! json == json%
 [{"type": "node",
   "data":
@@ -88,7 +93,9 @@ run_meta
    "notReady": false,
    "name": "MyNat",
    "location":
-   {"range": {"pos": {"line": 3, "column": 0}, "endPos": {"line": 6, "column": 24}}, "module": "ArchitectTest.MyNat"},
+   {"range":
+    {"pos": {"line": $(lineOffset), "column": 0}, "endPos": {"line": $(lineOffset + 3), "column": 24}},
+    "module": "ArchitectTest.MyNat"},
    "latexLabel": "MyNat",
    "hasLean": true,
    "file": $(currFile),
@@ -107,7 +114,9 @@ run_meta
    "notReady": false,
    "name": "MyNat.add",
    "location":
-   {"range": {"pos": {"line": 12, "column": 0}, "endPos": {"line": 19, "column": 28}}, "module": "ArchitectTest.MyNat"},
+   {"range":
+    {"pos": {"line": $(lineOffset + 9), "column": 0}, "endPos": {"line": $(lineOffset + 16), "column": 28}},
+    "module": "ArchitectTest.MyNat"},
    "latexLabel": "def:nat-add",
    "hasLean": true,
    "file": $(currFile),
@@ -118,15 +127,24 @@ run_meta
    "statement":
    {"usesLabels": [],
     "uses": [],
-    "text": "For any natural number $a$, $0 + a = a$, where $+$ is \\cref{def:nat-add}.",
+    "text":
+    "For any natural number $a$, $0 + a = a$, where $+$ is \\cref{def:nat-add}.",
     "latexEnv": "theorem",
     "excludesLabels": [],
     "excludes": []},
-   "proof": {"usesLabels": [], "uses": [], "text": "", "latexEnv": "proof", "excludesLabels": [], "excludes": []},
+   "proof":
+   {"usesLabels": [],
+    "uses": [],
+    "text": "",
+    "latexEnv": "proof",
+    "excludesLabels": [],
+    "excludes": []},
    "notReady": false,
    "name": "MyNat.zero_add",
    "location":
-   {"range": {"pos": {"line": 21, "column": 0}, "endPos": {"line": 25, "column": 31}}, "module": "ArchitectTest.MyNat"},
+   {"range":
+    {"pos": {"line": $(lineOffset + 18), "column": 0}, "endPos": {"line": $(lineOffset + 22), "column": 31}},
+    "module": "ArchitectTest.MyNat"},
    "latexLabel": "MyNat.zero_add",
    "hasLean": true,
    "file": $(currFile),
@@ -141,11 +159,19 @@ run_meta
     "latexEnv": "theorem",
     "excludesLabels": [],
     "excludes": []},
-   "proof": {"usesLabels": [], "uses": [], "text": "", "latexEnv": "proof", "excludesLabels": [], "excludes": []},
+   "proof":
+   {"usesLabels": [],
+    "uses": [],
+    "text": "",
+    "latexEnv": "proof",
+    "excludesLabels": [],
+    "excludes": []},
    "notReady": false,
    "name": "MyNat.succ_add",
    "location":
-   {"range": {"pos": {"line": 27, "column": 0}, "endPos": {"line": 32, "column": 7}}, "module": "ArchitectTest.MyNat"},
+   {"range":
+    {"pos": {"line": $(lineOffset + 24), "column": 0}, "endPos": {"line": $(lineOffset + 29), "column": 7}},
+    "module": "ArchitectTest.MyNat"},
    "latexLabel": "MyNat.succ_add",
    "hasLean": true,
    "file": $(currFile),
@@ -160,11 +186,19 @@ run_meta
     "latexEnv": "theorem",
     "excludesLabels": [],
     "excludes": []},
-   "proof": {"usesLabels": [], "uses": [], "text": "", "latexEnv": "proof", "excludesLabels": [], "excludes": []},
+   "proof":
+   {"usesLabels": [],
+    "uses": [],
+    "text": "",
+    "latexEnv": "proof",
+    "excludesLabels": [],
+    "excludes": []},
    "notReady": false,
    "name": "MyNat.add_comm",
    "location":
-   {"range": {"pos": {"line": 34, "column": 0}, "endPos": {"line": 44, "column": 26}}, "module": "ArchitectTest.MyNat"},
+   {"range":
+    {"pos": {"line": $(lineOffset + 31), "column": 0}, "endPos": {"line": $(lineOffset + 41), "column": 26}},
+    "module": "ArchitectTest.MyNat"},
    "latexLabel": "MyNat.add_comm",
    "hasLean": true,
    "file": $(currFile),
@@ -183,7 +217,9 @@ run_meta
    "notReady": false,
    "name": "MyNat.mul",
    "location":
-   {"range": {"pos": {"line": 48, "column": 0}, "endPos": {"line": 51, "column": 38}}, "module": "ArchitectTest.MyNat"},
+   {"range":
+    {"pos": {"line": $(lineOffset + 45), "column": 0}, "endPos": {"line": $(lineOffset + 48), "column": 38}},
+    "module": "ArchitectTest.MyNat"},
    "latexLabel": "MyNat.mul",
    "hasLean": true,
    "file": $(currFile),
@@ -198,11 +234,19 @@ run_meta
     "latexEnv": "theorem",
     "excludesLabels": [],
     "excludes": []},
-   "proof": {"usesLabels": [], "uses": [], "text": "", "latexEnv": "proof", "excludesLabels": [], "excludes": []},
+   "proof":
+   {"usesLabels": [],
+    "uses": [],
+    "text": "",
+    "latexEnv": "proof",
+    "excludesLabels": [],
+    "excludes": []},
    "notReady": false,
    "name": "MyNat.mul_comm",
    "location":
-   {"range": {"pos": {"line": 53, "column": 0}, "endPos": {"line": 55, "column": 62}}, "module": "ArchitectTest.MyNat"},
+   {"range":
+    {"pos": {"line": $(lineOffset + 50), "column": 0}, "endPos": {"line": $(lineOffset + 52), "column": 62}},
+    "module": "ArchitectTest.MyNat"},
    "latexLabel": "MyNat.mul_comm",
    "hasLean": true,
    "file": $(currFile),
@@ -227,7 +271,9 @@ run_meta
    "notReady": true,
    "name": "MyNat.flt",
    "location":
-   {"range": {"pos": {"line": 59, "column": 0}, "endPos": {"line": 68, "column": 37}}, "module": "ArchitectTest.MyNat"},
+   {"range":
+    {"pos": {"line": $(lineOffset + 56), "column": 0}, "endPos": {"line": $(lineOffset + 65), "column": 37}},
+    "module": "ArchitectTest.MyNat"},
    "latexLabel": "thm:flt",
    "hasLean": true,
    "file": $(currFile),

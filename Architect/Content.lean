@@ -1,6 +1,9 @@
-import Architect.Basic
-import Architect.Command
+module
 
+public import Architect.Basic
+public import Architect.Command
+
+public meta section
 
 open Lean Elab
 

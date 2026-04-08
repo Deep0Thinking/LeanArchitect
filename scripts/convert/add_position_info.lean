@@ -1,7 +1,6 @@
 import Architect.Load
 import Cli
 
-
 open Lean
 
 /-! This file contains utilities for porting from an existing LaTeX blueprint. -/
