@@ -109,9 +109,7 @@ def NodePart.toLatex (part : NodePart) (allParts : Array NodePart := #[part]) (i
   return out
 
 def isMathlibOk (name : Name) : m Bool := do
-  let some modIdx := (← getEnv).getModuleIdxFor? name | return false
-  let module := (← getEnv).allImportedModuleNames[modIdx]!
-  return [`Init, `Lean, `Std, `Batteries, `Mathlib].any fun pre => pre.isPrefixOf module
+  return isLibraryDecl (← getEnv) name
 
 /-- Whether a node is sorry-free (both statement and proof have no `sorryAx`). -/
 def Node.isLeanOk (node : Node) : m Bool := do
@@ -212,7 +210,10 @@ def NodeWithPos.toLatex (node : NodeWithPos) : m Latex := do
   -- In the output, we merge the Lean nodes corresponding to the same LaTeX label.
   let env ← getEnv
   let opts ← getOptions
-  let allLeanNames := getLeanNamesOfLatexLabel env node.latexLabel
+  -- Auto-nodes (from `blueprint.all`) are materialized during extraction and don't register a
+  -- `latexLabel → name` mapping the way `@[blueprint]` does, so fall back to this node's own name.
+  let labelNames := getLeanNamesOfLatexLabel env node.latexLabel
+  let allLeanNames := if labelNames.isEmpty then #[node.name] else labelNames
   let allNodes := allLeanNames.filterMap fun name => findBlueprintNode? env opts name
 
   let mut addLatex := ""

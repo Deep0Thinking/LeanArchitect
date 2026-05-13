@@ -134,6 +134,17 @@ register_option blueprint.all : Bool := {
   descr := "Automatically add all declarations with docstrings to the blueprint."
 }
 
+/-- The module-name prefixes considered to be "libraries" (the standard library, Mathlib, etc.)
+rather than the project being blueprinted. -/
+def libraryModulePrefixes : List Name := [`Init, `Lean, `Std, `Batteries, `Mathlib]
+
+/-- Whether `name` comes from a library module (see `libraryModulePrefixes`), as opposed to the
+project being blueprinted. Declarations from the current file return `false`. -/
+def isLibraryDecl (env : Environment) (name : Name) : Bool :=
+  match env.getModuleIdxFor? name with
+  | some idx => libraryModulePrefixes.any (·.isPrefixOf env.allImportedModuleNames[idx]!)
+  | none => false
+
 /-- Whether a constant is eligible for auto-blueprinting:
 a "real" declaration (theorem, def, opaque, or inductive) that is not auxiliary. -/
 private def isAutoEligible (env : Environment) (name : Name) : Bool :=
@@ -145,6 +156,7 @@ private def isAutoEligible (env : Environment) (name : Name) : Bool :=
 /-- Create an auto-node from a constant's docstring. Returns `none` if ineligible. -/
 def mkAutoNode (env : Environment) (name : Name) : Option Node :=
   if !isAutoEligible env name then none
+  else if isLibraryDecl env name then none  -- imports (Mathlib etc.) are never auto-blueprinted
   else if (blueprintExt.find? env name).isSome then none  -- already explicitly tagged
   else match docStringExt.find? env name with
     | none => none  -- no docstring
