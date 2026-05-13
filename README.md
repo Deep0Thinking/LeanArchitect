@@ -261,6 +261,41 @@ leanOptions = [{ name = "blueprint.all", value = true }]
 
 Note: `blueprint.all` only auto-blueprints the modules it is applied to; declarations from imported libraries (e.g. Mathlib) are never auto-blueprinted.
 
+### Customizing the LaTeX environment
+
+Auto-mode picks the LaTeX environment from the kernel-level kind of the declaration: theorem-kind → `\begin{theorem}`, def/inductive/opaque → `\begin{definition}`. Lean does not preserve the surface keyword across macro expansion — for example, Mathlib's `lemma` is a macro that desugars to `theorem` before LeanArchitect sees it, so auto-mode can't tell `lemma foo` apart from `theorem foo` and renders both as `\begin{theorem}`. Two ways to control this:
+
+**Per-declaration override.** Explicit `@[blueprint ...]` takes precedence over auto-mode, so you can selectively pick a different environment:
+
+```lean
+@[blueprint (latexEnv := "lemma")]
+lemma mul_one (a : G) : a * 1 = a := …
+```
+
+**Project-side `macro_rules`.** To avoid tagging each declaration, drop a small file into your project — e.g. `MyProject/Blueprint.lean` — that redirects the surface keyword so it carries the attribute automatically. Mathlib's `lemma` syntax has a single `declModifiers` slot that already includes the attribute position, so the simplest correct shape captures the optional `docComment` separately and lets the RHS attribute land in the rewritten `theorem`'s own modifiers:
+
+```lean
+-- MyProject/Blueprint.lean
+/-
+  Route Mathlib's `lemma` keyword to `\begin{lemma}` in the published
+  blueprint. Without this, auto-mode sees only the kernel-level
+  declaration kind (theorem-kind for `lemma`) and renders both
+  `theorem foo` and `lemma foo` as `\begin{theorem}`.
+-/
+
+import Architect
+import Mathlib.Tactic.Lemma
+
+macro_rules
+  | `(command| $[$doc:docComment]? lemma $id:declId $sig:declSig $val:declVal) =>
+    `(command| $[$doc:docComment]? @[blueprint (latexEnv := "lemma")]
+        theorem $id:declId $sig:declSig $val:declVal)
+```
+
+Then `import MyProject.Blueprint` at the top of any file where you write lemmas. After that, `lemma foo : … := …` and `/-- … -/ lemma foo : … := …` render as `\begin{lemma}` under `blueprint.all` with no per-declaration tags. Apply the same shape to `proposition`/`corollary` (or any other keyword you define) as needed. This recipe is intentionally kept project-side: the right keyword set is opinionated and the recipe avoids coupling LeanArchitect to Mathlib's surface syntax.
+
+**Scope.** The recipe above covers bare and docstring'd lemmas — the typical blueprint case. It does *not* match lemmas with other modifiers (`private`, `noncomputable`, a pre-existing `@[…]`); for those, fall back to the per-declaration override.
+
 ## Progress statistics
 
 To view formalization progress, use the `#blueprint_progress` command in Lean:
