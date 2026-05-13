@@ -218,7 +218,7 @@ so that the `\input` line above works. Here are some typical examples for doing 
 
 ## Auto-blueprinting
 
-By default, each declaration must be tagged with `@[blueprint]` to appear in the blueprint. To automatically include all declarations with docstrings, use:
+By default, each declaration must be tagged with `@[blueprint]` to appear in the blueprint. To automatically include all declarations with docstrings, set `blueprint.all`:
 
 ```lean
 set_option blueprint.all true
@@ -234,7 +234,7 @@ theorem helper : ... := ...               -- NOT included (no docstring)
 
 The statement text comes from the docstring, dependencies are auto-inferred, and the LaTeX environment is determined by the declaration kind (theorem → `theorem`, def/inductive → `definition`).
 
-To override specific options for a declaration, add `@[blueprint ...]` explicitly — it takes precedence over auto-mode:
+To override specific options for a declaration, add `@[blueprint ...]` explicitly — it takes precedence over auto-mode. An explicit `@[blueprint]` with no `statement := ...` also uses the declaration's docstring as its statement:
 
 ```lean
 /-- Fermat's last theorem. -/
@@ -242,7 +242,24 @@ To override specific options for a declaration, add `@[blueprint ...]` explicitl
 theorem flt : ... := ...
 ```
 
-Note: `blueprint.all` only affects the current file. Imported modules are not auto-blueprinted.
+### Enabling `blueprint.all` for the generated blueprint
+
+`set_option blueprint.all true` written inside a `.lean` file only affects that file *interactively* (e.g. `#blueprint_progress`); it is not visible to `lake build :blueprint`, which runs as a separate process. To auto-blueprint a library in the generated blueprint, set the option in your `lakefile`'s `leanOptions` instead (this also drives the interactive commands, so you don't need the `set_option` line):
+
+```lean
+-- lakefile.lean
+lean_lib MyProject where
+  leanOptions := #[⟨`blueprint.all, true⟩]
+```
+
+```toml
+# lakefile.toml
+[[lean_lib]]
+name = "MyProject"
+leanOptions = [{ name = "blueprint.all", value = true }]
+```
+
+Note: `blueprint.all` only auto-blueprints the modules it is applied to; declarations from imported libraries (e.g. Mathlib) are never auto-blueprinted.
 
 ## Progress statistics
 

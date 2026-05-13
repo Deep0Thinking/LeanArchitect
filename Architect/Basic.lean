@@ -171,24 +171,34 @@ def findBlueprintNode? (env : Environment) (opts : Options) (name : Name) : Opti
 def isBlueprintNode (env : Environment) (opts : Options) (name : Name) : Bool :=
   (findBlueprintNode? env opts name).isSome
 
-/-- Get all blueprint nodes from an imported module.
-Auto-nodes are NOT included for imported modules — `blueprint.all` only affects the current file. -/
+/-- Collect auto-nodes (from `blueprint.all`) for all constants in `env` satisfying `keep`. -/
+private def collectAutoNodes (env : Environment) (keep : Name → Bool) : Array (Name × Node) :=
+  env.constants.fold (init := #[]) fun acc name _ =>
+    if keep name then
+      match mkAutoNode env name with
+      | some node => acc.push (name, node)
+      | none => acc
+    else acc
+
+/-- Get all explicit (`@[blueprint]`) nodes from an imported module. -/
 def getModuleBlueprintNodes (env : Environment) (_opts : Options) (modIdx : ModuleIdx) :
     Array (Name × Node) :=
   blueprintExt.getModuleEntries env modIdx
+
+/-- Get auto-nodes (from `blueprint.all`) for an imported module. Returns `#[]` unless `blueprint.all`
+is set in `opts`. This is only used when extracting that module's own blueprint — `blueprint.all` is
+otherwise scoped to the current file, so e.g. `#blueprint_progress` does not auto-blueprint imports. -/
+def getModuleAutoBlueprintNodes (env : Environment) (opts : Options) (modIdx : ModuleIdx) :
+    Array (Name × Node) :=
+  if !blueprint.all.get opts then #[]
+  else collectAutoNodes env fun name => (env.getModuleIdxFor? name).any (·.toNat == modIdx.toNat)
 
 /-- Get all blueprint nodes from the current file (not yet imported), including auto-nodes. -/
 def getLocalBlueprintNodes (env : Environment) (opts : Options) : Array (Name × Node) :=
   let explicit := (blueprintExt.getEntries env).toArray
   if !blueprint.all.get opts then explicit
-  else
-    -- Find constants in env but not in any imported module
-    let autoNodes := env.constants.fold (init := #[]) fun acc name _ =>
-      if env.getModuleIdxFor? name |>.isSome then acc  -- from an import
-      else match mkAutoNode env name with
-        | some node => acc.push (name, node)
-        | none => acc
-    explicit ++ autoNodes
+  -- Auto-nodes: constants in `env` but not in any imported module (i.e. from the current file)
+  else explicit ++ collectAutoNodes env fun name => (env.getModuleIdxFor? name).isNone
 
 end AutoBlueprint
 
